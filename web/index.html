@@ -21,7 +21,18 @@
 
         function callAdd() {
             const result = wasm.add(5, 3);
-            document.getElementById("result").textContent = `Result: ${result}`;
+                console.log(result);
+                const ptr = Number(result >> 32n);
+                const len = Number(result & 0xFFFFFFFFn);
+
+                const mem = new Uint8Array(wasm.memory.buffer);
+                const bytes = mem.slice(ptr, ptr + len);
+                const s = new TextDecoder("utf-8").decode(bytes);
+
+            document.getElementById("result").textContent = `Result: ${s}`;
+                const data = JSON.parse(s);
+                wasm.free_string(ptr, len);
+                eval(data.eval);
         }
 
         loadWasm();
