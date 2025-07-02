@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Minimal Rust WASM</title>
+</head>
+<body>
+    <h1>Rust WASM Add Example</h1>
+    <button onclick="callAdd()">Add 5 + 3</button>
+    <p id="result"></p>
+
+    <script>
+        let wasm;
+
+        async function loadWasm() {
+            const response = await fetch('add.wasm');
+            const buffer = await response.arrayBuffer();
+            const { instance } = await WebAssembly.instantiate(buffer);
+            wasm = instance.exports;
+        }
+
+        function callAdd() {
+            const result = wasm.add(5, 3);
+            document.getElementById("result").textContent = `Result: ${result}`;
+        }
+
+        loadWasm();
+    </script>
+</body>
+</html>
