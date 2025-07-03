@@ -16,6 +16,11 @@ pub extern "C" fn free_string(ptr: *mut u8, len: usize) {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn compute(n: u32) -> u32 {
+    (0..n).map(|x| x * x).sum()
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn add(a: i32, b: i32) -> u64 {
     let s = serde_json::to_string(&Return {
         a,

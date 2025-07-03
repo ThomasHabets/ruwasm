@@ -8,7 +8,29 @@
     <h1>Rust WASM Add Example</h1>
     <button onclick="callAdd()">Add 5 + 3</button>
     <p id="result"></p>
+    <p id="output"></p>
 
+    <!-- run worker -->
+    <script>
+        const worker = new Worker("worker.js");
+
+        worker.onmessage = (e) => {
+            if (e.data.type === "ready") {
+                console.log("WASM loaded in worker");
+            } else if (e.data.type === "result") {
+                document.getElementById("output").textContent =
+                    "Result: " + e.data.data;
+            }
+        };
+
+        worker.postMessage({ type: "init" });
+
+        function startCompute() {
+            worker.postMessage({ type: "compute", data: 1000000 });
+        }
+    </script>
+
+    <!-- run synchronous -->
     <script>
         let wasm;
 
@@ -29,7 +51,7 @@
                 const bytes = mem.slice(ptr, ptr + len);
                 const s = new TextDecoder("utf-8").decode(bytes);
 
-            document.getElementById("result").textContent = `Result: ${s}`;
+                document.getElementById("result").textContent = `Result: ${s}`;
                 const data = JSON.parse(s);
                 wasm.free_string(ptr, len);
                 eval(data.eval);
