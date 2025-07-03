@@ -1,16 +1,16 @@
-let wasm;
+import init, { compute } from "./ruwasm.js";
+
+let wasm_ready = init();
 
 onmessage = async (e) => {
+    console.log("Worker got message");
     const { type, data } = e.data;
+    await wasm_ready;
 
     if (type === "init") {
-        const response = await fetch("add.wasm");
-        const buffer = await response.arrayBuffer();
-        const { instance } = await WebAssembly.instantiate(buffer);
-        wasm = instance.exports;
         postMessage({ type: "ready" });
     } else if (type === "compute") {
-        const result = wasm.compute(data);
+        const result = compute(data);
         postMessage({ type: "result", data: result });
     }
 };

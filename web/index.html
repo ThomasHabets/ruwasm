@@ -7,57 +7,45 @@
 <body>
     <h1>Rust WASM Add Example</h1>
     <button onclick="callAdd()">Add 5 + 3</button>
+    <button onclick="startCompute()">Compute</button>
     <p id="result"></p>
     <p id="output"></p>
 
-    <!-- run worker -->
+    <!-- run worker  -->
     <script>
-        const worker = new Worker("worker.js");
+            const worker = new Worker("worker.js", {type: "module"});
 
         worker.onmessage = (e) => {
             if (e.data.type === "ready") {
                 console.log("WASM loaded in worker");
             } else if (e.data.type === "result") {
+                    console.log("Got from worker: " + e.data.data);
                 document.getElementById("output").textContent =
                     "Result: " + e.data.data;
+                    console.log("bleh: " + e.data.data.toString());
+            } else {
+                    console.log("Unknown message from worker");
             }
         };
 
         worker.postMessage({ type: "init" });
 
         function startCompute() {
+            console.log("Sending compute message");
             worker.postMessage({ type: "compute", data: 1000000 });
         }
     </script>
 
     <!-- run synchronous -->
-    <script>
-        let wasm;
+    <script type="module">
+            import init, { add } from "./ruwasm.js";
 
-        async function loadWasm() {
-            const response = await fetch('add.wasm');
-            const buffer = await response.arrayBuffer();
-            const { instance } = await WebAssembly.instantiate(buffer);
-            wasm = instance.exports;
-        }
+                async function callAdd() {
+                    await init();
+                    document.getElementById("result").textContent = add(3,5);
+                }
+                window.callAdd = callAdd;
 
-        function callAdd() {
-            const result = wasm.add(5, 3);
-                console.log(result);
-                const ptr = Number(result >> 32n);
-                const len = Number(result & 0xFFFFFFFFn);
-
-                const mem = new Uint8Array(wasm.memory.buffer);
-                const bytes = mem.slice(ptr, ptr + len);
-                const s = new TextDecoder("utf-8").decode(bytes);
-
-                document.getElementById("result").textContent = `Result: ${s}`;
-                const data = JSON.parse(s);
-                wasm.free_string(ptr, len);
-                eval(data.eval);
-        }
-
-        loadWasm();
     </script>
 </body>
 </html>

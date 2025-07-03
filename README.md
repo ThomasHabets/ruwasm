@@ -1,3 +1,4 @@
-rustup target add wasm32-unknown-unknow
-cargo build --target wasm32-unknown-unknown --release
-cp target/wasm32-unknown-unknown/release/ruwasm.wasm web/add.wasm
+
+cargo install wasm-pack
+wasm-pack build --target web
+stuff now gets added to pkg/, and needs to work with the HTML and JS in web/
