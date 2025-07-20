@@ -1,6 +1,9 @@
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
+use rustradio::block::Block;
+use rustradio::blocks::*;
+
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = console)]
@@ -31,6 +34,20 @@ pub fn add(a: i32, b: i32) -> String {
         eval: "console.log('hello world')".to_string(),
     })
     .unwrap()
+}
+
+#[wasm_bindgen]
+pub fn radio(a: i32, b: i32) -> String {
+    log(&format!("Hello radio, adding {a} and {b}"));
+    let (mut b1, src1) = VectorSource::new(vec![a]);
+    b1.work().unwrap();
+    let (mut b2, src2) = VectorSource::new(vec![b]);
+    b2.work().unwrap();
+    let (mut b3, out) = Add::new(src1, src2);
+    b3.work().unwrap();
+    let (r, _) = out.read_buf().unwrap();
+    let o = r.slice();
+    format!("Result is now {o:?}").to_string()
 }
 
 #[cfg(test)]
