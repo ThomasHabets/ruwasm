@@ -47,7 +47,7 @@
                 }
                 async function callRadio() {
                         try {
-                            document.getElementById("result").textContent = radio(40,2);
+                            document.getElementById("result").textContent = radio();
                         } catch (e) {
                             console.error("WASM trap:", e);
                             console.error(e.stack);
