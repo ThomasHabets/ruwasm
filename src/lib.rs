@@ -39,22 +39,27 @@ pub fn add(a: i32, b: i32) -> String {
 }
 
 #[wasm_bindgen]
-pub fn radio() -> String {
-    radio_wrap().expect("oh no")
+pub fn radio(data: &[u8]) -> String {
+    match radio_wrap(data) {
+        Ok(s) => s,
+        Err(e) => format!("Error: {e}").to_string(),
+    }
 }
 
-fn radio_wrap() -> rustradio::Result<String> {
-    log(&format!("AX.25 9600 decode"));
+fn radio_wrap(data: &[u8]) -> rustradio::Result<String> {
+    log(&format!("AX.25 9600 decode of {} bytes", data.len()));
     let samp_rate = 50_000.0;
     let if_rate = 50_000.0;
     let baud = 9600.0;
-    let symbol_taps = vec![0.0001, 0.9999];
+    //let symbol_taps = vec![0.0001, 0.9999];
+    let symbol_taps = vec![1.0];
     let max_deviation = 0.1;
     let mut g = Graph::new();
     let prev = blockchain![
         g,
         prev,
-        VectorSource::new(vec![Complex::default()]),
+        VectorSource::new(data.to_vec()),
+        Parse::new(prev),
         FftFilter::new(
             prev,
             rustradio::fir::low_pass_complex(
@@ -67,7 +72,8 @@ fn radio_wrap() -> rustradio::Result<String> {
         RationalResampler::builder()
             .deci(samp_rate as usize)
             .interp(if_rate as usize)
-            .build(prev)?,
+            .build(prev)
+            .map_err(|e| rustradio::Error::wrap(e, "rational resampler"))?,
         QuadratureDemod::new(prev, 1.0),
         SymbolSync::new(
             prev,
@@ -81,7 +87,10 @@ fn radio_wrap() -> rustradio::Result<String> {
         Descrambler::g3ruh(prev),
         HdlcDeframer::new(prev, 10, 1500),
     ];
-    g.run()?;
+
+    log(&format!("Running graph"));
+    g.run()
+        .map_err(|e| rustradio::Error::wrap(e, "graph run"))?;
     Ok(match prev.pop() {
         None => "nothing decoded".to_string(),
         Some(p) => format!("Decoded {p:?}").to_string(),

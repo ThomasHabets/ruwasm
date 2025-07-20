@@ -9,6 +9,7 @@
     <button onclick="callAdd()">Add 5 + 3</button>
     <button onclick="callRadio()">rustradio</button>
     <button onclick="startCompute()">Compute</button>
+    <input type="file" id="fileInput" />
     <p id="result"></p>
     <p id="output"></p>
 
@@ -40,9 +41,10 @@
     <!-- run synchronous -->
     <script type="module">
             import init, { add, radio } from "./ruwasm.js";
-
+                await init();
+                console.log("WASM initialized");
                 async function callAdd() {
-                    await init();
+                    //await init();
                     document.getElementById("result").textContent = add(3,5);
                 }
                 async function callRadio() {
@@ -56,6 +58,24 @@
                 window.callAdd = callAdd;
                 window.callRadio = callRadio;
 
+                // File uploader.
+                fileInput.addEventListener('change', async ev => {
+                    const file = ev.target.files?.[0];   // File extends Blob
+                    if (!file) return;
+
+                    console.log(`name: ${file.name}, size: ${file.size} bytes, type: ${file.type}`);
+
+                    // -------- Or convert to raw bytes --------
+                    const buf  = await file.arrayBuffer();       // ArrayBuffer
+                    const data = new Uint8Array(buf);            // Uint8Array view
+                    console.log('first 16 bytes:', data.slice(0, 16));
+                        try {
+                            document.getElementById("result").textContent = radio(data);
+                        } catch (e) {
+                            console.error("WASM trap:", e);
+                            console.error(e.stack);
+                        }
+                });
     </script>
 </body>
 </html>
