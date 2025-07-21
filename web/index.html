@@ -5,11 +5,23 @@
     <title>Minimal Rust WASM</title>
 </head>
 <body>
-    <h1>Rust WASM Add Example</h1>
-    <button onclick="callAdd()">Add 5 + 3</button>
-    <button onclick="callRadio()">rustradio</button>
-    <button onclick="startCompute()">Compute</button>
-    <input type="file" id="fileInput" />
+    <h1>Rust WASM RustRadio Example</h1>
+    <h2>Instructions</h2>
+    <p>
+      First ensure WASM is fully loaded. The buttons should become enabled, and
+      a massage saying "WASM loaded" should show up.
+    </p> <p>
+      You can click the "add" button to run a simple test, making sure that WASM
+      works.
+    </p> <p>
+      Then you can upload a 50ksps 32bit complex float I/Q via the browse
+      button. Rustradio will run on it, and will give you the bytes for the
+      first 1200bps AX.25 packet decoded.
+    </p>
+    <button id="btn-add" onclick="callAdd()" disabled>Add 5 + 3</button>
+    <!-- <button onclick="callRadio()">rustradio</button> -->
+    <!-- <button onclick="startCompute()">Compute</button> -->
+    <input type="file" id="fileInput" disabled />
     <p id="result"></p>
     <p id="output"></p>
 
@@ -42,6 +54,9 @@
     <script type="module">
             import init, { add, radio } from "./ruwasm.js";
                 await init();
+                document.getElementById("result").textContent = "WASM loaded";
+                document.getElementById("btn-add").disabled = false;
+                document.getElementById("fileInput").disabled = false;
                 console.log("WASM initialized");
                 async function callAdd() {
                     //await init();
