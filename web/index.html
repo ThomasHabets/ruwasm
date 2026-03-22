@@ -29,8 +29,10 @@
     <!-- <button onclick="callRadio()">rustradio</button> -->
     <!-- <button onclick="startCompute()">Compute</button> -->
     <input type="file" id="fileInput" disabled />
+    <h2>From wasm</h2>
     <pre id="result"></pre>
-    <p id="output"></p>
+    <h2>From wasm in worker mode</h2>
+    <div id="worker-output"></div>
 
     <!-- run worker  -->
     <script>
@@ -40,17 +42,21 @@
         worker.onmessage = (e) => {
             if (e.data.type === "ready") {
                 console.log("WASM loaded in worker");
+            } else if (e.data.type === "git_version") {
+                let p = document.createElement("pre");
+                p.textContent = "Worker mode git version: " + e.data.data;
+                document.getElementById("worker-output").appendChild(p);
             } else if (e.data.type === "result") {
-                    console.log("Got from worker: " + e.data.data);
-                document.getElementById("output").textContent =
-                    "Result: " + e.data.data;
-                    console.log("bleh: " + e.data.data.toString());
+                let p = document.createElement("pre");
+                p.textContent = e.data.data;
+                document.getElementById("worker-output").appendChild(p);
             } else {
-                    console.log("Unknown message from worker");
+                console.log("Unknown message from worker");
             }
         };
 
         worker.postMessage({ type: "init" });
+        worker.postMessage({ type: "git_version", data: null });
 
         function startCompute() {
             console.log("Sending compute message");

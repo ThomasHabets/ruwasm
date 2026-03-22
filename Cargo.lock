@@ -356,7 +356,7 @@ dependencies = [
 [[package]]
 name = "rustradio"
 version = "0.15.1"
-source = "git+https://github.com/ThomasHabets/rustradio?branch=wasm#2e673e03996314f8b8b2d2a7b9fd49c2ef5876ff"
+source = "git+https://github.com/ThomasHabets/rustradio?branch=wasm#c02772d74fbb7a9180aa9974ab4ae439e9a5119d"
 dependencies = [
  "async-trait",
  "fast-math",
@@ -373,13 +373,14 @@ dependencies = [
  "tar",
  "tempfile",
  "thiserror",
+ "wasm-bindgen",
  "web-sys",
 ]
 
 [[package]]
 name = "rustradio_macros"
 version = "0.15.1"
-source = "git+https://github.com/ThomasHabets/rustradio?branch=wasm#2e673e03996314f8b8b2d2a7b9fd49c2ef5876ff"
+source = "git+https://github.com/ThomasHabets/rustradio?branch=wasm#c02772d74fbb7a9180aa9974ab4ae439e9a5119d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -390,7 +391,7 @@ dependencies = [
 [[package]]
 name = "rustradio_macros_code"
 version = "0.15.1"
-source = "git+https://github.com/ThomasHabets/rustradio?branch=wasm#2e673e03996314f8b8b2d2a7b9fd49c2ef5876ff"
+source = "git+https://github.com/ThomasHabets/rustradio?branch=wasm#c02772d74fbb7a9180aa9974ab4ae439e9a5119d"
 dependencies = [
  "proc-macro2",
  "quote",

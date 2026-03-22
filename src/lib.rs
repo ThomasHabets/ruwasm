@@ -4,12 +4,14 @@ use wasm_bindgen::prelude::*;
 use rustradio::block::Block;
 use rustradio::blocks::*;
 use rustradio::graph::{Graph, GraphRunner};
-use rustradio::{Complex, blockchain};
+use rustradio::blockchain;
 
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = console)]
     fn log(s: &str);
+    #[wasm_bindgen(js_namespace = performance)]
+    fn now() -> f64;
 }
 
 #[wasm_bindgen]
@@ -23,6 +25,7 @@ pub struct Return {
 
 #[wasm_bindgen]
 pub fn git_version() -> String {
+    log(&format!("git_version() called"));
     env!("GIT_VERSION").to_string()
 }
 
@@ -33,6 +36,7 @@ pub fn rustc_version() -> String {
 
 #[wasm_bindgen]
 pub fn compute(n: u32) -> u32 {
+    log(&format!("From rust: compute() called"));
     (0..n).map(|x| x * x).sum()
 }
 
