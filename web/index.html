@@ -52,9 +52,12 @@
 
     <!-- run synchronous -->
     <script type="module">
-            import init, { git_version, add, radio } from "./ruwasm.js";
+            import init, { git_version, rustc_version, add, radio } from "./ruwasm.js";
             await init();
-            document.getElementById("result").textContent = "WASM loaded. Git version: " + git_version();
+            document.getElementById("result").innerHTML = (
+                "WASM loaded.<br>Git version: " + git_version()
+                + "<br>Rust version " + rustc_version()
+            );
             document.getElementById("btn-add").disabled = false;
             document.getElementById("fileInput").disabled = false;
             console.log("WASM initialized");

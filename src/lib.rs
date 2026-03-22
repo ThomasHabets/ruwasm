@@ -27,6 +27,11 @@ pub fn git_version() -> String {
 }
 
 #[wasm_bindgen]
+pub fn rustc_version() -> String {
+    env!("RUSTC_VERSION").to_string()
+}
+
+#[wasm_bindgen]
 pub fn compute(n: u32) -> u32 {
     (0..n).map(|x| x * x).sum()
 }
