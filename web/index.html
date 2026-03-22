@@ -34,6 +34,7 @@
 
     <!-- run worker  -->
     <script>
+        // TODO: check worker version matches HTML version.
         const worker = new Worker("worker.js", {type: "module"});
 
         worker.onmessage = (e) => {
@@ -61,9 +62,11 @@
     <script type="module">
             import init, { git_version, rustc_version, add, radio } from "./ruwasm.js";
             await init();
+            // TODO: check WASM version against HTML version. Should match.
             document.getElementById("result").innerHTML = (
-                "WASM loaded.<br>Git version: " + git_version()
-                + "<br>Rust version: " + rustc_version()
+                "WASM loaded."
+                + "<br>WASM code version: " + git_version()
+                + "<br>WASM built by Rust version: " + rustc_version()
             );
             document.getElementById("btn-add").disabled = false;
             document.getElementById("fileInput").disabled = false;
