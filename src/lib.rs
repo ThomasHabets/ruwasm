@@ -106,9 +106,14 @@ fn radio_wrap_1200(data: &[u8]) -> rustradio::Result<String> {
     log(&format!("Running graph"));
     g.run()
         .map_err(|e| rustradio::Error::wrap(e, "graph run"))?;
-    Ok(match prev.pop() {
-        None => "nothing decoded".to_string(),
-        Some(p) => format!("Decoded {p:?}").to_string(),
+    let mut outs = Vec::new();
+    while let Some(p) = prev.pop() {
+        outs.push(format!("Decoded {p:?}").to_string());
+    }
+    Ok(if outs.is_empty() {
+        "nothing decoded".to_string()
+    } else {
+        outs.join("\n")
     })
 }
 fn radio_wrap_9600(data: &[u8]) -> rustradio::Result<String> {

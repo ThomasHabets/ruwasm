@@ -22,12 +22,12 @@
     <!-- <button onclick="callRadio()">rustradio</button> -->
     <!-- <button onclick="startCompute()">Compute</button> -->
     <input type="file" id="fileInput" disabled />
-    <p id="result"></p>
+    <pre id="result"></pre>
     <p id="output"></p>
 
     <!-- run worker  -->
     <script>
-            const worker = new Worker("worker.js", {type: "module"});
+        const worker = new Worker("worker.js", {type: "module"});
 
         worker.onmessage = (e) => {
             if (e.data.type === "ready") {
@@ -53,44 +53,43 @@
     <!-- run synchronous -->
     <script type="module">
             import init, { add, radio } from "./ruwasm.js";
-                await init();
-                document.getElementById("result").textContent = "WASM loaded";
-                document.getElementById("btn-add").disabled = false;
-                document.getElementById("fileInput").disabled = false;
-                console.log("WASM initialized");
-                async function callAdd() {
-                    //await init();
-                    document.getElementById("result").textContent = add(3,5);
+            await init();
+            document.getElementById("result").textContent = "WASM loaded";
+            document.getElementById("btn-add").disabled = false;
+            document.getElementById("fileInput").disabled = false;
+            console.log("WASM initialized");
+            async function callAdd() {
+                document.getElementById("result").textContent = add(3,5);
+            }
+            async function callRadio() {
+                try {
+                    document.getElementById("result").textContent = radio();
+                } catch (e) {
+                    console.error("WASM trap:", e);
+                    console.error(e.stack);
                 }
-                async function callRadio() {
-                        try {
-                            document.getElementById("result").textContent = radio();
-                        } catch (e) {
-                            console.error("WASM trap:", e);
-                            console.error(e.stack);
-                        }
-                }
-                window.callAdd = callAdd;
-                window.callRadio = callRadio;
+            }
+            window.callAdd = callAdd;
+            window.callRadio = callRadio;
 
-                // File uploader.
-                fileInput.addEventListener('change', async ev => {
-                    const file = ev.target.files?.[0];   // File extends Blob
-                    if (!file) return;
+            // File uploader.
+            fileInput.addEventListener('change', async ev => {
+                const file = ev.target.files?.[0];   // File extends Blob
+                if (!file) return;
 
-                    console.log(`name: ${file.name}, size: ${file.size} bytes, type: ${file.type}`);
+                console.log(`name: ${file.name}, size: ${file.size} bytes, type: ${file.type}`);
 
-                    // -------- Or convert to raw bytes --------
-                    const buf  = await file.arrayBuffer();       // ArrayBuffer
-                    const data = new Uint8Array(buf);            // Uint8Array view
-                    console.log('first 16 bytes:', data.slice(0, 16));
-                        try {
-                            document.getElementById("result").textContent = radio(data);
-                        } catch (e) {
-                            console.error("WASM trap:", e);
-                            console.error(e.stack);
-                        }
-                });
+                // -------- Or convert to raw bytes --------
+                const buf  = await file.arrayBuffer();       // ArrayBuffer
+                const data = new Uint8Array(buf);            // Uint8Array view
+                console.log('first 16 bytes:', data.slice(0, 16));
+                    try {
+                        document.getElementById("result").textContent = radio(data);
+                    } catch (e) {
+                        console.error("WASM trap:", e);
+                        console.error(e.stack);
+                    }
+            });
     </script>
 </body>
 </html>
