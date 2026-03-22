@@ -22,6 +22,11 @@ pub struct Return {
 }
 
 #[wasm_bindgen]
+pub fn git_version() -> String {
+    env!("GIT_VERSION").to_string()
+}
+
+#[wasm_bindgen]
 pub fn compute(n: u32) -> u32 {
     (0..n).map(|x| x * x).sum()
 }

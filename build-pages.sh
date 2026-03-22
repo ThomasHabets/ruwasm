@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+#VER="$(git describe --tags --dirty --always)"
 WEBD="web"
 PREFIX="ruwasm"
 OUTDIR="dist"
