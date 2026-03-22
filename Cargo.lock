@@ -117,6 +117,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fast-math"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2465292146cdfc2011350fe3b1c616ac83cf0faeedb33463ba1c332ed8948d66"
+dependencies = [
+ "ieee754",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -155,6 +164,12 @@ dependencies = [
  "r-efi",
  "wasi",
 ]
+
+[[package]]
+name = "ieee754"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9007da9cacbd3e6343da136e98b0d2df013f553d35bdec8b518f07bea768e19c"
 
 [[package]]
 name = "itertools"
@@ -340,9 +355,11 @@ dependencies = [
 
 [[package]]
 name = "rustradio"
-version = "0.14.2"
+version = "0.15.1"
+source = "git+https://github.com/ThomasHabets/rustradio?branch=wasm#264cb541065c5e6a8bccca70fdf863ccbd5584d8"
 dependencies = [
  "async-trait",
+ "fast-math",
  "itertools",
  "libc",
  "log",
@@ -361,7 +378,8 @@ dependencies = [
 
 [[package]]
 name = "rustradio_macros"
-version = "0.14.2"
+version = "0.15.1"
+source = "git+https://github.com/ThomasHabets/rustradio?branch=wasm#264cb541065c5e6a8bccca70fdf863ccbd5584d8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -371,7 +389,8 @@ dependencies = [
 
 [[package]]
 name = "rustradio_macros_code"
-version = "0.1.0"
+version = "0.15.1"
+source = "git+https://github.com/ThomasHabets/rustradio?branch=wasm#264cb541065c5e6a8bccca70fdf863ccbd5584d8"
 dependencies = [
  "proc-macro2",
  "quote",
