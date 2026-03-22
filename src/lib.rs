@@ -25,6 +25,7 @@ pub struct Return {
 
 #[wasm_bindgen]
 pub fn git_version() -> String {
+    rustradio::sys::initialize_rustradio();
     log(&format!("git_version() called"));
     env!("GIT_VERSION").to_string()
 }
