@@ -1,3 +1,4 @@
+# Temporary repo, to be moved into rustradio as an example
 
 cargo install wasm-pack
 wasm-pack build --target web
