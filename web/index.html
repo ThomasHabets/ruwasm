@@ -39,6 +39,7 @@
     </p>
 
     <button id="btn-add" disabled>Add 5 + 3</button>
+    <button id="btn-post" onclick="postit()" >Send message to worker</button>
     <!-- <button onclick="callRadio()">rustradio</button> -->
     <!-- <button onclick="startCompute()">Compute</button> -->
     <input type="file" id="fileInput" disabled />
@@ -64,9 +65,12 @@
                 p.textContent = e.data.data;
                 document.getElementById("worker-output").appendChild(p);
             } else {
-                console.log("Unknown message from worker");
+                console.log("Unknown message from worker", e.data);
             }
         };
+        function postit() {
+           worker.postMessage({ type: "git_version", data: null });
+        }
 
         worker.postMessage({ type: "init" });
         worker.postMessage({ type: "git_version", data: null });

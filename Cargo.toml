@@ -24,6 +24,8 @@ features = [
     "Blob",
     "FileReader",
     "Event",
+    "DedicatedWorkerGlobalScope",
+    "Worker",
     "MessageEvent",
     "ProgressEvent",
     "console",

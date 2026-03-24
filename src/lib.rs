@@ -31,6 +31,7 @@ pub fn start() -> Result<(), JsValue> {
     log(&format!("ruwasm: Starting at time {}", now()));
     if web_sys::window().is_none() {
         log("No window. Probably running in worker");
+        worker::setup()?;
         return Ok(());
     };
     mainthread::setup()
@@ -72,6 +73,13 @@ pub fn radio(data: &[u8]) -> String {
         Ok(s) => s,
         Err(e) => format!("Error: {e}").to_string(),
     }
+}
+
+use web_sys::js_sys::Uint8Array;
+pub(crate) fn uint8array_to_vec(arr: &Uint8Array) -> Vec<u8> {
+    let mut buf = vec![0; arr.length() as usize];
+    arr.copy_to(&mut buf);
+    buf
 }
 
 pub(crate) fn radio_wrap_1200(data: &[u8]) -> rustradio::Result<String> {

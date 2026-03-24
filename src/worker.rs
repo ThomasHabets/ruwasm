@@ -2,8 +2,50 @@ use rustradio::block::Block;
 use rustradio::blockchain;
 use rustradio::blocks::*;
 use rustradio::graph::{Graph, GraphRunner};
+use wasm_bindgen::prelude::*;
+use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
 use crate::log;
+use crate::uint8array_to_vec;
+
+fn message_data_as_vec(data: JsValue) -> Option<Vec<u8>> {
+    if data.is_instance_of::<web_sys::js_sys::Uint8Array>() {
+        Some(uint8array_to_vec(&web_sys::js_sys::Uint8Array::new(&data)))
+    } else if data.is_instance_of::<web_sys::js_sys::ArrayBuffer>() {
+        Some(uint8array_to_vec(&web_sys::js_sys::Uint8Array::new(&data)))
+    } else {
+        None
+    }
+}
+
+pub(crate) fn setup() -> Result<(), JsValue> {
+    log("Setting up worker");
+    let global = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
+
+    let worker = global.clone();
+    let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
+        let data = message_data_as_vec(event.data()).expect("not bytes");
+        let o = radio_1200(&data).expect("rustradio run failed");
+        worker.post_message(&JsValue::from_str(&o)).unwrap();
+        /*
+        if let Some(text) = event.data().as_string() {
+            web_sys::console::log_1(&format!("worker received: {text}").into());
+
+            let reply = format!("pong: {text}");
+            worker.post_message(&JsValue::from_str(&reply)).unwrap();
+        } else {
+            worker
+                .post_message(&JsValue::from_str("worker got non-string message"))
+                .unwrap();
+        }
+        */
+    });
+
+    global.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+    onmessage.forget();
+    log("Done setting up worker");
+    Ok(())
+}
 
 fn radio_1200(data: &[u8]) -> rustradio::Result<String> {
     log(&format!("AX.25 1200 decode of {} bytes", data.len()));

@@ -1,7 +1,8 @@
 import init, { git_version, compute } from "./ruwasm.js";
 
 let wasm_ready = init();
-
+await wasm_ready;
+/*
 onmessage = async (e) => {
     console.log("Worker got message");
     const { type, data } = e.data;
@@ -16,3 +17,4 @@ onmessage = async (e) => {
         postMessage({ type: "result", data: result });
     }
 };
+*/

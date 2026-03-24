@@ -5,19 +5,26 @@ use std::rc::Rc;
 use std::sync::mpsc;
 
 use wasm_bindgen::prelude::*;
+use web_sys::Worker;
 use web_sys::js_sys::Uint8Array;
 use web_sys::{Element, Event, File, FileReader, HtmlInputElement, ProgressEvent};
 
 use crate::log;
+use crate::uint8array_to_vec;
 
 const HTML_DISABLED: &str = "disabled";
 const ID_RESULT: &str = "result";
 const ID_FILE_INPUT: &str = "fileInput";
 
-fn uint8array_to_vec(arr: &Uint8Array) -> Vec<u8> {
-    let mut buf = vec![0; arr.length() as usize];
-    arr.copy_to(&mut buf);
-    buf
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = worker)]
+    static WORKER: Worker;
+}
+
+fn send_bytes(worker: &Worker, data: &[u8]) -> Result<(), JsValue> {
+    let array = web_sys::js_sys::Uint8Array::from(data);
+    worker.post_message(&array.into())
 }
 
 fn get_element(id: &str) -> Result<Element, JsValue> {
@@ -40,6 +47,19 @@ fn set_content(id: &str, content: &str) -> Result<(), JsValue> {
 }
 
 pub(crate) fn setup() -> Result<(), JsValue> {
+    /*
+       let worker = Worker::new("./worker.js")?;
+
+    let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |e: MessageEvent| {
+        let reply = js_sys::Uint8Array::new(&e.data());
+        let mut buf = vec![0; reply.length() as usize];
+        reply.copy_to(&mut buf);
+        web_sys::console::log_1(&format!("main got: {:?}", buf).into());
+    });
+
+    worker.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+    onmessage.forget();
+    */
     set_content(
         ID_RESULT,
         &format!(
@@ -133,9 +153,12 @@ fn read_file_in_chunks(
                 post_eof();
                 // TODO: stream it instead.
                 // TODO: this should be done in the worker.
-                let a = crate::radio_wrap_1200(&whole_file.borrow()).unwrap();
-                log(&format!("Output: {a}"));
-                set_content(ID_RESULT, &a).unwrap();
+                //let a = crate::radio_wrap_1200(&whole_file.borrow()).unwrap();
+                let bytes = whole_file.borrow();
+                let arr = web_sys::js_sys::Uint8Array::from(bytes.as_ref());
+                WORKER.post_message(&arr.into()).unwrap();
+                //log(&format!("Output: {a}"));
+                //set_content(ID_RESULT, &a).unwrap();
                 return;
             }
 
