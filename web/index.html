@@ -51,6 +51,7 @@
     <!-- run worker  -->
     <script>
         // TODO: check worker version matches HTML version.
+            /*
         const worker = new Worker("worker.js", {type: "module"});
 
         worker.onmessage = (e) => {
@@ -79,6 +80,7 @@
             console.log("Sending compute message");
             worker.postMessage({ type: "compute", data: 1000000 });
         }
+        */
     </script>
 
     <!-- run synchronous -->

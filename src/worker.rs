@@ -26,6 +26,7 @@ pub(crate) fn setup() -> Result<(), JsValue> {
     let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
         let data = message_data_as_vec(event.data()).expect("not bytes");
         let o = radio_1200(&data).expect("rustradio run failed");
+        log(&format!("Worker run returned: {o}"));
         worker.post_message(&JsValue::from_str(&o)).unwrap();
         /*
         if let Some(text) = event.data().as_string() {

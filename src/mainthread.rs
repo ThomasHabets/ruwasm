@@ -1,13 +1,16 @@
 // This file is for stuff in the main thread.
 
+use std::cell::OnceCell;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc;
 
 use wasm_bindgen::prelude::*;
-use web_sys::Worker;
+use web_sys::js_sys;
 use web_sys::js_sys::Uint8Array;
-use web_sys::{Element, Event, File, FileReader, HtmlInputElement, ProgressEvent};
+use web_sys::{
+    Element, Event, File, FileReader, HtmlInputElement, MessageEvent, ProgressEvent, Worker,
+};
 
 use crate::log;
 use crate::uint8array_to_vec;
@@ -16,10 +19,50 @@ const HTML_DISABLED: &str = "disabled";
 const ID_RESULT: &str = "result";
 const ID_FILE_INPUT: &str = "fileInput";
 
+/*
+ * JS global variables.
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_name = worker)]
     static WORKER: Worker;
+}
+*/
+
+thread_local! {
+    static WORKER: OnceCell<Worker> = const { OnceCell::new() };
+}
+fn worker() -> Worker {
+    WORKER.with(|cell| {
+        cell.get_or_init(|| {
+            let mut opts = web_sys::WorkerOptions::new();
+            opts.type_(web_sys::WorkerType::Module);
+            let worker = Worker::new_with_options("./worker.js", &opts).unwrap();
+
+            let onmessage = Closure::<dyn FnMut(MessageEvent) -> Result<(), JsValue>>::new(
+                move |e: MessageEvent| {
+                    if let Some(s) = e.data().as_string() {
+                        set_content(ID_RESULT, &s)?;
+                        web_sys::console::log_1(&format!("worker returned: {s}").into());
+                    } else {
+                        web_sys::console::log_1(&"not a string".into());
+                    }
+                    Ok(())
+                    /*
+                    let data = js_sys::Uint8Array::new(&e.data());
+                    let mut buf = vec![0; data.length() as usize];
+                    data.copy_to(&mut buf);
+                    web_sys::console::log_1(&format!("main got: {:?}", buf).into());
+                    */
+                },
+            );
+
+            worker.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+            onmessage.forget();
+
+            worker
+        })
+        .clone()
+    })
 }
 
 fn send_bytes(worker: &Worker, data: &[u8]) -> Result<(), JsValue> {
@@ -156,7 +199,7 @@ fn read_file_in_chunks(
                 //let a = crate::radio_wrap_1200(&whole_file.borrow()).unwrap();
                 let bytes = whole_file.borrow();
                 let arr = web_sys::js_sys::Uint8Array::from(bytes.as_ref());
-                WORKER.post_message(&arr.into()).unwrap();
+                worker().post_message(&arr.into()).unwrap();
                 //log(&format!("Output: {a}"));
                 //set_content(ID_RESULT, &a).unwrap();
                 return;

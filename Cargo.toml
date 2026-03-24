@@ -26,6 +26,8 @@ features = [
     "Event",
     "DedicatedWorkerGlobalScope",
     "Worker",
+    "WorkerOptions",
+    "WorkerType",
     "MessageEvent",
     "ProgressEvent",
     "console",
