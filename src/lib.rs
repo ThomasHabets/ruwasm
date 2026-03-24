@@ -2,9 +2,12 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use rustradio::block::Block;
+use rustradio::blockchain;
 use rustradio::blocks::*;
 use rustradio::graph::{Graph, GraphRunner};
-use rustradio::blockchain;
+
+mod mainthread;
+mod worker;
 
 #[wasm_bindgen]
 extern "C" {
@@ -21,6 +24,16 @@ pub struct Return {
     b: i32,
     sum: i32,
     eval: String,
+}
+
+#[wasm_bindgen(start)]
+pub fn start() -> Result<(), JsValue> {
+    log(&format!("ruwasm: Starting at time {}", now()));
+    if web_sys::window().is_none() {
+        log("No window. Probably running in worker");
+        return Ok(());
+    };
+    mainthread::setup()
 }
 
 #[wasm_bindgen]
@@ -61,7 +74,7 @@ pub fn radio(data: &[u8]) -> String {
     }
 }
 
-fn radio_wrap_1200(data: &[u8]) -> rustradio::Result<String> {
+pub(crate) fn radio_wrap_1200(data: &[u8]) -> rustradio::Result<String> {
     log(&format!("AX.25 1200 decode of {} bytes", data.len()));
     let samp_rate = 50_000.0;
     let if_rate = 50_000.0;

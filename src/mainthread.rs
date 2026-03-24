@@ -1,0 +1,217 @@
+// This file is for stuff in the main thread.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::mpsc;
+
+use wasm_bindgen::prelude::*;
+use web_sys::js_sys::Uint8Array;
+use web_sys::{Element, Event, File, FileReader, HtmlInputElement, ProgressEvent};
+
+use crate::log;
+
+fn uint8array_to_vec(arr: &Uint8Array) -> Vec<u8> {
+    let mut buf = vec![0; arr.length() as usize];
+    arr.copy_to(&mut buf);
+    buf
+}
+
+fn get_element(id: &str) -> Result<Element, JsValue> {
+    let window = web_sys::window().ok_or(JsValue::from_str("no window"))?;
+    let document = window
+        .document()
+        .ok_or_else(|| JsValue::from_str("no document"))?;
+
+    document
+        .get_element_by_id(id)
+        .ok_or(JsValue::from_str(&format!(
+            "can't find element with id {id}"
+        )))
+}
+
+fn set_content(id: &str, content: &str) -> Result<(), JsValue> {
+    log(&format!("Setting inner HTML of {id}"));
+    get_element(id)?.set_inner_html(content);
+    Ok(())
+}
+
+pub(crate) fn setup() -> Result<(), JsValue> {
+    set_content(
+        "result",
+        &format!(
+            r#"<b>WASM loaded</b>
+WASM code version: {}
+WASM built by Rust version: {}"#,
+            crate::git_version(),
+            crate::rustc_version()
+        ),
+    )?;
+    let input = get_element("fileInput")?.dyn_into::<HtmlInputElement>()?;
+    // TODO: make some sort of UI friendly bounded channel. Don't want it to
+    // block.
+    let (tx, _rx) = mpsc::channel();
+    log("install");
+    install_file_chunk_listener(input, tx, 64 * 1024)?; // 64 KiB chunks
+    Ok(())
+}
+
+fn install_file_chunk_listener(
+    input: HtmlInputElement,
+    tx: mpsc::Sender<Vec<u8>>,
+    chunk_size: u64,
+) -> Result<(), JsValue> {
+    log("Adding listener");
+    let input = Rc::new(input);
+    let input2 = input.clone();
+    let on_change = Closure::<dyn FnMut(Event)>::wrap(Box::new(move |_event: Event| {
+        let tx = tx.clone();
+        let Some(files) = input.files() else {
+            return;
+        };
+        let Some(file) = files.get(0) else {
+            return;
+        };
+        log("Read file now!");
+        set_content("result", "Running rustradio on input…").unwrap();
+        if let Err(err) = read_file_in_chunks(file, tx, chunk_size) {
+            web_sys::console::error_1(&err);
+        }
+    }));
+
+    log("Adding event listener");
+    input2.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref())?;
+    log("Done Adding event listener");
+    on_change.forget();
+    Ok(())
+}
+
+fn read_file_in_chunks(
+    file: File,
+    tx: mpsc::Sender<Vec<u8>>,
+    chunk_size: u64,
+) -> Result<(), JsValue> {
+    let file_size = file.size() as u64;
+    let offset = Rc::new(RefCell::new(0u64));
+    let file = Rc::new(file);
+
+    let read_next: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let read_next_clone = Rc::clone(&read_next);
+
+    let whole_file = Rc::new(RefCell::<Vec<u8>>::new(vec![]));
+    let whole_file_inner = whole_file.clone();
+
+    *read_next.borrow_mut() = Some(Box::new({
+        let offset = Rc::clone(&offset);
+        let file = Rc::clone(&file);
+
+        move || {
+            let start = *offset.borrow();
+            if start >= file_size {
+                post_eof();
+                // TODO: stream it instead.
+                // TODO: this should be done in the worker.
+                let a = crate::radio_wrap_1200(&whole_file.borrow()).unwrap();
+                log(&format!("Output: {a}"));
+                set_content("result", &a).unwrap();
+                return;
+            }
+
+            let end = (start + chunk_size).min(file_size);
+            let blob = match file.slice_with_f64_and_f64(start as f64, end as f64) {
+                Ok(b) => b,
+                Err(err) => {
+                    web_sys::console::error_1(&err);
+                    return;
+                }
+            };
+
+            let reader = Rc::new(match FileReader::new() {
+                Ok(r) => r,
+                Err(err) => {
+                    web_sys::console::error_1(&err);
+                    return;
+                }
+            });
+
+            let next_offset = Rc::clone(&offset);
+            let next_read = Rc::clone(&read_next_clone);
+            let file_name = file.name();
+            let chunk_index = (start / chunk_size) as u32;
+            let is_last = end == file_size;
+
+            let onload = {
+                let reader = Rc::clone(&reader);
+                let whole_file_inner = Rc::clone(&whole_file_inner);
+                let tx = tx.clone();
+                Closure::<dyn FnMut(ProgressEvent)>::wrap(Box::new(move |_e: ProgressEvent| {
+                    let Ok(result) = reader.result() else {
+                        web_sys::console::error_1(&JsValue::from_str(
+                            "FileReader returned no result",
+                        ));
+                        return;
+                    };
+
+                    let bytes = Uint8Array::new(&result);
+                    let v = uint8array_to_vec(&bytes);
+                    whole_file_inner.borrow_mut().extend(&v);
+                    //tx.send(v).unwrap();
+                    post_chunk_message(&file_name, chunk_index, start, end, is_last, &bytes);
+
+                    *next_offset.borrow_mut() = end;
+
+                    if let Some(next) = next_read.borrow().as_ref() {
+                        next();
+                    }
+                }))
+            };
+
+            reader.set_onload(Some(onload.as_ref().unchecked_ref()));
+            onload.forget();
+
+            if let Err(err) = reader.read_as_array_buffer(&blob) {
+                web_sys::console::error_1(&err);
+            }
+        }
+    }));
+
+    if let Some(f) = read_next.borrow().as_ref() {
+        f();
+    }
+    log("Read file in chunks done");
+    Ok(())
+}
+
+fn post_eof() {
+    log("Post EOF");
+}
+
+fn post_chunk_message(
+    file_name: &str,
+    chunk_index: u32,
+    start: u64,
+    end: u64,
+    is_last: bool,
+    bytes: &Uint8Array,
+) {
+    log(&format!(
+        "Post chunk message not yet implemented, of len {}",
+        end - start
+    ));
+    //todo!()
+}
+fn post_message(msg: &JsValue) {
+    // If running on the main thread, send to window.
+    if let Some(window) = web_sys::window() {
+        let _ = window.post_message(msg, "*");
+        return;
+    }
+
+    // If running in a worker, send to the worker global scope.
+    let global = web_sys::js_sys::global();
+
+    if let Ok(worker) = global.dyn_into::<web_sys::WorkerGlobalScope>() {
+        // let _ = worker.post_message(msg);
+    } else {
+        web_sys::console::error_1(&JsValue::from_str("no postMessage target available"));
+    }
+}
