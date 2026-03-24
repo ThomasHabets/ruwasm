@@ -12,6 +12,7 @@ use crate::log;
 
 const HTML_DISABLED: &str = "disabled";
 const ID_RESULT: &str = "result";
+const ID_FILE_INPUT: &str = "fileInput";
 
 fn uint8array_to_vec(arr: &Uint8Array) -> Vec<u8> {
     let mut buf = vec![0; arr.length() as usize];
@@ -63,13 +64,15 @@ WASM built by Rust version: {}"#,
     }
 
     // Set up file input thing.
-    let input = get_element("fileInput")?.dyn_into::<HtmlInputElement>()?;
-    input.set_disabled(false);
-    // TODO: make some sort of UI friendly bounded channel. Don't want it to
-    // block.
-    let (tx, _rx) = mpsc::channel();
-    log("install");
-    install_file_chunk_listener(input, tx, 64 * 1024)?; // 64 KiB chunks
+    {
+        let input = get_element(ID_FILE_INPUT)?.dyn_into::<HtmlInputElement>()?;
+        input.set_disabled(false);
+        // TODO: make some sort of UI friendly bounded channel. Don't want it to
+        // block.
+        let (tx, _rx) = mpsc::channel();
+        log("install");
+        install_file_chunk_listener(input, tx, 64 * 1024)?; // 64 KiB chunks
+    }
     Ok(())
 }
 
