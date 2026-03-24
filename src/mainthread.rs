@@ -10,6 +10,9 @@ use web_sys::{Element, Event, File, FileReader, HtmlInputElement, ProgressEvent}
 
 use crate::log;
 
+const HTML_DISABLED: &str = "disabled";
+const ID_RESULT: &str = "result";
+
 fn uint8array_to_vec(arr: &Uint8Array) -> Vec<u8> {
     let mut buf = vec![0; arr.length() as usize];
     arr.copy_to(&mut buf);
@@ -37,7 +40,7 @@ fn set_content(id: &str, content: &str) -> Result<(), JsValue> {
 
 pub(crate) fn setup() -> Result<(), JsValue> {
     set_content(
-        "result",
+        ID_RESULT,
         &format!(
             r#"<b>WASM loaded</b>
 WASM code version: {}
@@ -46,7 +49,22 @@ WASM built by Rust version: {}"#,
             crate::rustc_version()
         ),
     )?;
+
+    // Set up Add button.
+    {
+        let handler = Closure::<dyn FnMut()>::new(move || {
+            web_sys::console::log_1(&"button clicked".into());
+            set_content(ID_RESULT, &format!("Result of add: {}", crate::add(3, 5)));
+        });
+        let btn = get_element("btn-add")?.dyn_into::<web_sys::HtmlButtonElement>()?;
+        btn.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())?;
+        btn.remove_attribute(HTML_DISABLED)?;
+        handler.forget();
+    }
+
+    // Set up file input thing.
     let input = get_element("fileInput")?.dyn_into::<HtmlInputElement>()?;
+    input.set_disabled(false);
     // TODO: make some sort of UI friendly bounded channel. Don't want it to
     // block.
     let (tx, _rx) = mpsc::channel();
@@ -72,7 +90,7 @@ fn install_file_chunk_listener(
             return;
         };
         log("Read file now!");
-        set_content("result", "Running rustradio on input…").unwrap();
+        set_content(ID_RESULT, "Running rustradio on input…").unwrap();
         if let Err(err) = read_file_in_chunks(file, tx, chunk_size) {
             web_sys::console::error_1(&err);
         }
@@ -112,7 +130,7 @@ fn read_file_in_chunks(
                 // TODO: this should be done in the worker.
                 let a = crate::radio_wrap_1200(&whole_file.borrow()).unwrap();
                 log(&format!("Output: {a}"));
-                set_content("result", &a).unwrap();
+                set_content(ID_RESULT, &a).unwrap();
                 return;
             }
 

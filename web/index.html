@@ -38,7 +38,7 @@
         project.
     </p>
 
-    <button id="btn-add" onclick="callAdd()" disabled>Add 5 + 3</button>
+    <button id="btn-add" disabled>Add 5 + 3</button>
     <!-- <button onclick="callRadio()">rustradio</button> -->
     <!-- <button onclick="startCompute()">Compute</button> -->
     <input type="file" id="fileInput" disabled />
@@ -79,8 +79,9 @@
 
     <!-- run synchronous -->
     <script type="module">
-            import init, { git_version, rustc_version, add, radio } from "./ruwasm.js";
+            import init, { git_version } from "./ruwasm.js";
             await init();
+            console.log("WASM initialized (says js) with WASM version ", git_version());
             // TODO: check WASM version against HTML version. Should match.
             if (false) {
                     document.getElementById("result").innerHTML = (
@@ -89,13 +90,6 @@
                         + "<br>WASM built by Rust version: " + rustc_version()
                     );
             }
-            document.getElementById("btn-add").disabled = false;
-            document.getElementById("fileInput").disabled = false;
-            console.log("WASM initialized");
-            async function callAdd() {
-                document.getElementById("result").textContent = add(3,5);
-            }
-            window.callAdd = callAdd;
     </script>
 </body>
 </html>

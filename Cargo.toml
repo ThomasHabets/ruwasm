@@ -18,6 +18,7 @@ features = [
     "WorkerGlobalScope",
     "Document",
     "HtmlInputElement",
+    "HtmlButtonElement",
     "File",
     "FileList",
     "Blob",
