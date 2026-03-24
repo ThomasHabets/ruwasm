@@ -84,20 +84,22 @@ fn install_file_chunk_listener(
     log("Adding listener");
     let input = Rc::new(input);
     let input2 = input.clone();
-    let on_change = Closure::<dyn FnMut(Event)>::wrap(Box::new(move |_event: Event| {
-        let tx = tx.clone();
-        let Some(files) = input.files() else {
-            return;
-        };
-        let Some(file) = files.get(0) else {
-            return;
-        };
-        log("Read file now!");
-        set_content(ID_RESULT, "Running rustradio on input…").unwrap();
-        if let Err(err) = read_file_in_chunks(file, tx, chunk_size) {
-            web_sys::console::error_1(&err);
-        }
-    }));
+    let on_change =
+        Closure::<dyn FnMut(Event) -> Result<(), JsValue>>::wrap(Box::new(move |_event: Event| {
+            let tx = tx.clone();
+            let Some(files) = input.files() else {
+                return Ok(());
+            };
+            let Some(file) = files.get(0) else {
+                return Ok(());
+            };
+            log("Read file now!");
+            set_content(ID_RESULT, "Running rustradio on input…")?;
+            if let Err(err) = read_file_in_chunks(file, tx, chunk_size) {
+                web_sys::console::error_1(&err);
+            }
+            Ok(())
+        }));
 
     log("Adding event listener");
     input2.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref())?;
