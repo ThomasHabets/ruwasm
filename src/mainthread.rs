@@ -52,9 +52,9 @@ WASM built by Rust version: {}"#,
 
     // Set up Add button.
     {
-        let handler = Closure::<dyn FnMut()>::new(move || {
+        let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
             web_sys::console::log_1(&"button clicked".into());
-            set_content(ID_RESULT, &format!("Result of add: {}", crate::add(3, 5)));
+            set_content(ID_RESULT, &format!("Result of add: {}", crate::add(3, 5)))
         });
         let btn = get_element("btn-add")?.dyn_into::<web_sys::HtmlButtonElement>()?;
         btn.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())?;
