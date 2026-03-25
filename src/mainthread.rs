@@ -90,6 +90,10 @@ fn set_content(id: &str, content: &str) -> Result<(), JsValue> {
 }
 
 pub(crate) fn setup() -> Result<(), JsValue> {
+    // Init the worker.
+    worker();
+    // TODO: wait for worker to be ready.
+
     /*
        let worker = Worker::new("./worker.js")?;
 
