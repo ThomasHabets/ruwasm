@@ -40,8 +40,6 @@
 
     <button id="btn-add" disabled>Add 5 + 3</button>
     <button id="btn-post" disabled>Send message to worker</button>
-    <!-- <button onclick="callRadio()">rustradio</button> -->
-    <!-- <button onclick="startCompute()">Compute</button> -->
     <input type="file" id="fileInput" disabled />
     <h2>From wasm</h2>
     <pre id="result"></pre>
@@ -49,41 +47,6 @@
     <h2>From wasm in worker mode</h2>
     <div id="worker-output"></div>
     -->
-
-    <!-- run worker  -->
-    <script>
-        // TODO: check worker version matches HTML version.
-            /*
-        const worker = new Worker("worker.js", {type: "module"});
-
-        worker.onmessage = (e) => {
-            if (e.data.type === "ready") {
-                console.log("WASM loaded in worker");
-            } else if (e.data.type === "git_version") {
-                let p = document.createElement("pre");
-                p.textContent = "Worker mode git version: " + e.data.data;
-                document.getElementById("worker-output").appendChild(p);
-            } else if (e.data.type === "result") {
-                let p = document.createElement("pre");
-                p.textContent = e.data.data;
-                document.getElementById("worker-output").appendChild(p);
-            } else {
-                console.log("Unknown message from worker", e.data);
-            }
-        };
-        function postit() {
-           worker.postMessage({ type: "git_version", data: null });
-        }
-
-        worker.postMessage({ type: "init" });
-        worker.postMessage({ type: "git_version", data: null });
-
-        function startCompute() {
-            console.log("Sending compute message");
-            worker.postMessage({ type: "compute", data: 1000000 });
-        }
-        */
-    </script>
 
     <!-- run synchronous -->
     <script type="module">

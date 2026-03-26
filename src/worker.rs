@@ -2,9 +2,11 @@ use rustradio::block::Block;
 use rustradio::blockchain;
 use rustradio::blocks::*;
 use rustradio::graph::{Graph, GraphRunner};
+use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
+use crate::WorkerToMain;
 use crate::log;
 use crate::uint8array_to_vec;
 
@@ -18,7 +20,7 @@ fn message_data_as_vec(data: JsValue) -> Option<Vec<u8>> {
     }
 }
 
-pub(crate) fn setup() -> Result<(), JsValue> {
+pub(crate) async fn setup() -> Result<(), JsValue> {
     log("Setting up worker");
     let global = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
 
@@ -27,7 +29,9 @@ pub(crate) fn setup() -> Result<(), JsValue> {
         let data = message_data_as_vec(event.data()).expect("not bytes");
         let o = radio_1200(&data).expect("rustradio run failed");
         log(&format!("Worker run returned: {o}"));
-        worker.post_message(&JsValue::from_str(&o)).unwrap();
+        worker
+            .post_message(&to_value(&WorkerToMain::Result(o)).expect("failed to serialize"))
+            .expect("failed to post message");
         /*
         if let Some(text) = event.data().as_string() {
             web_sys::console::log_1(&format!("worker received: {text}").into());
@@ -44,6 +48,7 @@ pub(crate) fn setup() -> Result<(), JsValue> {
 
     global.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
     onmessage.forget();
+    global.post_message(&to_value(&WorkerToMain::Ready)?)?;
     log("Done setting up worker");
     Ok(())
 }
@@ -101,7 +106,6 @@ fn radio_1200(data: &[u8]) -> rustradio::Result<String> {
         ),
         BinarySlicer::new(prev),
         NrziDecode::new(prev),
-        //Descrambler::g3ruh(prev),
         HdlcDeframer::new(prev, 10, 1500),
     ];
 

@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc;
 
+use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 use web_sys::js_sys;
 use web_sys::js_sys::Uint8Array;
@@ -12,6 +13,7 @@ use web_sys::{
     Element, Event, File, FileReader, HtmlInputElement, MessageEvent, ProgressEvent, Worker,
 };
 
+use crate::WorkerToMain;
 use crate::log;
 use crate::uint8array_to_vec;
 
@@ -40,11 +42,16 @@ fn worker() -> Worker {
 
             let onmessage = Closure::<dyn FnMut(MessageEvent) -> Result<(), JsValue>>::new(
                 move |e: MessageEvent| {
-                    if let Some(s) = e.data().as_string() {
-                        set_content(ID_RESULT, &s)?;
-                        web_sys::console::log_1(&format!("worker returned: {s}").into());
-                    } else {
-                        web_sys::console::log_1(&"not a string".into());
+                    match from_value::<WorkerToMain>(e.data())? {
+                        WorkerToMain::Ready => {
+                            log("Received WorkerToMain::Ready");
+                        }
+                        WorkerToMain::Result(s) => {
+                            set_content(ID_RESULT, &s)?;
+                            web_sys::console::log_1(&format!("worker returned: {s}").into());
+                        }
+                        WorkerToMain::Ping => {}
+                        WorkerToMain::Pong => {}
                     }
                     Ok(())
                     /*

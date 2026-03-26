@@ -1,4 +1,5 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 
 use rustradio::block::Block;
@@ -17,6 +18,22 @@ extern "C" {
     fn now() -> f64;
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
+enum MainToWorker {
+    Ping,
+    Pong,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
+enum WorkerToMain {
+    Ready,
+    Ping,
+    Pong,
+    Result(String),
+}
+
 #[wasm_bindgen]
 #[derive(Serialize)]
 pub struct Return {
@@ -27,11 +44,13 @@ pub struct Return {
 }
 
 #[wasm_bindgen(start)]
-pub fn start() -> Result<(), JsValue> {
+pub async fn start() -> Result<(), JsValue> {
     log(&format!("ruwasm: Starting at time {}", now()));
+    console_error_panic_hook::set_once();
+
     if web_sys::window().is_none() {
         log("No window. Probably running in worker");
-        worker::setup()?;
+        worker::setup().await?;
         return Ok(());
     };
     mainthread::setup()
