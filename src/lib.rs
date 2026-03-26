@@ -21,6 +21,7 @@ extern "C" {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 enum MainToWorker {
+    Data(Vec<u8>),
     Ping,
     Pong,
 }

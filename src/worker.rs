@@ -6,9 +6,9 @@ use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
-use crate::WorkerToMain;
 use crate::log;
 use crate::uint8array_to_vec;
+use crate::{MainToWorker, WorkerToMain};
 
 fn message_data_as_vec(data: JsValue) -> Option<Vec<u8>> {
     if data.is_instance_of::<web_sys::js_sys::Uint8Array>() {
@@ -26,12 +26,17 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
 
     let worker = global.clone();
     let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
-        let data = message_data_as_vec(event.data()).expect("not bytes");
-        let o = radio_1200(&data).expect("rustradio run failed");
-        log(&format!("Worker run returned: {o}"));
-        worker
-            .post_message(&to_value(&WorkerToMain::Result(o)).expect("failed to serialize"))
-            .expect("failed to post message");
+        match from_value::<MainToWorker>(event.data()).expect("parsing MainToWorker message") {
+            MainToWorker::Data(data) => {
+                let o = radio_1200(&data).expect("rustradio run failed");
+                log(&format!("Worker run returned: {o}"));
+                worker
+                    .post_message(&to_value(&WorkerToMain::Result(o)).expect("failed to serialize"))
+                    .expect("failed to post message");
+            }
+            MainToWorker::Ping => {}
+            MainToWorker::Pong => {}
+        }
         /*
         if let Some(text) = event.data().as_string() {
             web_sys::console::log_1(&format!("worker received: {text}").into());

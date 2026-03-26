@@ -13,9 +13,9 @@ use web_sys::{
     Element, Event, File, FileReader, HtmlInputElement, MessageEvent, ProgressEvent, Worker,
 };
 
-use crate::WorkerToMain;
 use crate::log;
 use crate::uint8array_to_vec;
+use crate::{MainToWorker, WorkerToMain};
 
 const HTML_DISABLED: &str = "disabled";
 const ID_RESULT: &str = "result";
@@ -206,11 +206,11 @@ fn read_file_in_chunks(
             if start >= file_size {
                 post_eof();
                 // TODO: stream it instead.
-                // TODO: this should be done in the worker.
                 //let a = crate::radio_wrap_1200(&whole_file.borrow()).unwrap();
                 let bytes = whole_file.borrow();
-                let arr = web_sys::js_sys::Uint8Array::from(bytes.as_ref());
-                worker().post_message(&arr.into()).unwrap();
+                worker()
+                    .post_message(&to_value(&MainToWorker::Data(bytes.to_vec())).unwrap())
+                    .unwrap();
                 //log(&format!("Output: {a}"));
                 //set_content(ID_RESULT, &a).unwrap();
                 return;
