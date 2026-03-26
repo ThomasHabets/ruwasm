@@ -7,7 +7,6 @@ use std::sync::mpsc;
 
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
-use web_sys::js_sys;
 use web_sys::js_sys::Uint8Array;
 use web_sys::{
     Element, Event, File, FileReader, HtmlInputElement, MessageEvent, ProgressEvent, Worker,
@@ -36,8 +35,8 @@ thread_local! {
 fn worker() -> Worker {
     WORKER.with(|cell| {
         cell.get_or_init(|| {
-            let mut opts = web_sys::WorkerOptions::new();
-            opts.type_(web_sys::WorkerType::Module);
+            let opts = web_sys::WorkerOptions::new();
+            opts.set_type(web_sys::WorkerType::Module);
             let worker = Worker::new_with_options("./worker.js", &opts).unwrap();
 
             let onmessage = Closure::<dyn FnMut(MessageEvent) -> Result<(), JsValue>>::new(
@@ -70,11 +69,6 @@ fn worker() -> Worker {
         })
         .clone()
     })
-}
-
-fn send_bytes(worker: &Worker, data: &[u8]) -> Result<(), JsValue> {
-    let array = web_sys::js_sys::Uint8Array::from(data);
-    worker.post_message(&array.into())
 }
 
 fn get_element(id: &str) -> Result<Element, JsValue> {
@@ -242,7 +236,7 @@ fn read_file_in_chunks(
             let onload = {
                 let reader = Rc::clone(&reader);
                 let whole_file_inner = Rc::clone(&whole_file_inner);
-                let tx = tx.clone();
+                let _tx = tx.clone();
                 Closure::<dyn FnMut(ProgressEvent)>::wrap(Box::new(move |_e: ProgressEvent| {
                     let Ok(result) = reader.result() else {
                         web_sys::console::error_1(&JsValue::from_str(
@@ -286,32 +280,16 @@ fn post_eof() {
 }
 
 fn post_chunk_message(
-    file_name: &str,
-    chunk_index: u32,
+    _file_name: &str,
+    _chunk_index: u32,
     start: u64,
     end: u64,
-    is_last: bool,
-    bytes: &Uint8Array,
+    _is_last: bool,
+    _bytes: &Uint8Array,
 ) {
     log(&format!(
         "Post chunk message not yet implemented, of len {}",
         end - start
     ));
     //todo!()
-}
-fn post_message(msg: &JsValue) {
-    // If running on the main thread, send to window.
-    if let Some(window) = web_sys::window() {
-        let _ = window.post_message(msg, "*");
-        return;
-    }
-
-    // If running in a worker, send to the worker global scope.
-    let global = web_sys::js_sys::global();
-
-    if let Ok(worker) = global.dyn_into::<web_sys::WorkerGlobalScope>() {
-        // let _ = worker.post_message(msg);
-    } else {
-        web_sys::console::error_1(&JsValue::from_str("no postMessage target available"));
-    }
 }

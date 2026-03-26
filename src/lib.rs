@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 
 use rustradio::block::Block;
@@ -170,56 +169,6 @@ pub(crate) fn radio_wrap_1200(data: &[u8]) -> rustradio::Result<String> {
         "nothing decoded".to_string()
     } else {
         outs.join("\n")
-    })
-}
-fn radio_wrap_9600(data: &[u8]) -> rustradio::Result<String> {
-    log(&format!("AX.25 9600 decode of {} bytes", data.len()));
-    let samp_rate = 50_000.0;
-    let if_rate = 50_000.0;
-    let baud = 9600.0;
-    //let symbol_taps = vec![0.0001, 0.9999];
-    let symbol_taps = vec![1.0];
-    let max_deviation = 0.1;
-    let mut g = Graph::new();
-    let prev = blockchain![
-        g,
-        prev,
-        VectorSource::new(data.to_vec()),
-        Parse::new(prev),
-        FftFilter::new(
-            prev,
-            rustradio::fir::low_pass_complex(
-                samp_rate,
-                12_500.0,
-                100.0,
-                &rustradio::window::WindowType::Hamming
-            )
-        ),
-        RationalResampler::builder()
-            .deci(samp_rate as usize)
-            .interp(if_rate as usize)
-            .build(prev)
-            .map_err(|e| rustradio::Error::wrap(e, "rational resampler"))?,
-        QuadratureDemod::new(prev, 1.0),
-        SymbolSync::new(
-            prev,
-            if_rate / baud,
-            max_deviation,
-            Box::new(rustradio::symbol_sync::TedZeroCrossing::new()),
-            Box::new(rustradio::iir_filter::IirFilter::new(&symbol_taps))
-        ),
-        BinarySlicer::new(prev),
-        NrziDecode::new(prev),
-        Descrambler::g3ruh(prev),
-        HdlcDeframer::new(prev, 10, 1500),
-    ];
-
-    log(&format!("Running graph"));
-    g.run()
-        .map_err(|e| rustradio::Error::wrap(e, "graph run"))?;
-    Ok(match prev.pop() {
-        None => "nothing decoded".to_string(),
-        Some(p) => format!("Decoded {p:?}").to_string(),
     })
 }
 

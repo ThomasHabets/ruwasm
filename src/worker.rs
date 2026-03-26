@@ -1,4 +1,3 @@
-use rustradio::block::Block;
 use rustradio::blockchain;
 use rustradio::blocks::*;
 use rustradio::graph::{Graph, GraphRunner};
@@ -7,18 +6,7 @@ use wasm_bindgen::prelude::*;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
 use crate::log;
-use crate::uint8array_to_vec;
 use crate::{MainToWorker, WorkerToMain};
-
-fn message_data_as_vec(data: JsValue) -> Option<Vec<u8>> {
-    if data.is_instance_of::<web_sys::js_sys::Uint8Array>() {
-        Some(uint8array_to_vec(&web_sys::js_sys::Uint8Array::new(&data)))
-    } else if data.is_instance_of::<web_sys::js_sys::ArrayBuffer>() {
-        Some(uint8array_to_vec(&web_sys::js_sys::Uint8Array::new(&data)))
-    } else {
-        None
-    }
-}
 
 pub(crate) async fn setup() -> Result<(), JsValue> {
     log("Setting up worker");
@@ -125,5 +113,58 @@ fn radio_1200(data: &[u8]) -> rustradio::Result<String> {
         "nothing decoded".to_string()
     } else {
         outs.join("\n")
+    })
+}
+
+// TODO: add support for 9600
+#[allow(unused)]
+fn radio_wrap_9600(data: &[u8]) -> rustradio::Result<String> {
+    log(&format!("AX.25 9600 decode of {} bytes", data.len()));
+    let samp_rate = 50_000.0;
+    let if_rate = 50_000.0;
+    let baud = 9600.0;
+    //let symbol_taps = vec![0.0001, 0.9999];
+    let symbol_taps = vec![1.0];
+    let max_deviation = 0.1;
+    let mut g = Graph::new();
+    let prev = blockchain![
+        g,
+        prev,
+        VectorSource::new(data.to_vec()),
+        Parse::new(prev),
+        FftFilter::new(
+            prev,
+            rustradio::fir::low_pass_complex(
+                samp_rate,
+                12_500.0,
+                100.0,
+                &rustradio::window::WindowType::Hamming
+            )
+        ),
+        RationalResampler::builder()
+            .deci(samp_rate as usize)
+            .interp(if_rate as usize)
+            .build(prev)
+            .map_err(|e| rustradio::Error::wrap(e, "rational resampler"))?,
+        QuadratureDemod::new(prev, 1.0),
+        SymbolSync::new(
+            prev,
+            if_rate / baud,
+            max_deviation,
+            Box::new(rustradio::symbol_sync::TedZeroCrossing::new()),
+            Box::new(rustradio::iir_filter::IirFilter::new(&symbol_taps))
+        ),
+        BinarySlicer::new(prev),
+        NrziDecode::new(prev),
+        Descrambler::g3ruh(prev),
+        HdlcDeframer::new(prev, 10, 1500),
+    ];
+
+    log(&format!("Running graph"));
+    g.run()
+        .map_err(|e| rustradio::Error::wrap(e, "graph run"))?;
+    Ok(match prev.pop() {
+        None => "nothing decoded".to_string(),
+        Some(p) => format!("Decoded {p:?}").to_string(),
     })
 }
