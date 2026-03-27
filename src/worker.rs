@@ -1,4 +1,5 @@
 use rustradio::blockchain;
+use serde::{Deserialize, Serialize};
 use rustradio::blocks::*;
 use rustradio::graph::{Graph, GraphRunner};
 use serde_wasm_bindgen::{from_value, to_value};
@@ -8,8 +9,57 @@ use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 use crate::log;
 use crate::{MainToWorker, WorkerToMain};
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+struct Ctx {
+    v: u8,
+}
+
+/*
+impl web_thread::AsJs for Ctx {
+     fn to_js(&self) -> Result<JsValue, JsValue> {
+         to_value(&self).map_err(JsValue::null())
+     }
+    fn from_js(js_value: JsValue) -> Result<Self, JsValue>
+       where Self: Sized {
+           todo!()
+       }
+}
+*/
+impl web_thread::Post for Ctx { }
+
+use std::cell::OnceCell;
+use std::sync::Arc;
+use wasm_bindgen_spawn::ThreadCreator;
+
+thread_local! {
+    static THREAD_CREATOR: OnceCell<Arc<ThreadCreator>> = const { OnceCell::new() };
+}
+fn thread_creator() -> Arc<ThreadCreator> {
+    THREAD_CREATOR.with(|cell| Arc::clone(cell.get().unwrap()))
+}
+
+
 pub(crate) async fn setup() -> Result<(), JsValue> {
     log("Setting up worker");
+    /*
+    let th = web_thread::Thread::new();
+    let task = th.run(Ctx{v: 0}, |_ctx| {
+        log("THREEEEEEEEEEEEEEEAAAAAD");
+        std::future::ready(12)
+    });
+    */
+    let tc = thread_creator();
+    /*
+    tc.spawn(|| {
+        log("THREEEEEEEEEEAAAAAAAAD");
+    });
+    */
+
+    //log(&format!("thread returned {}", task.await.map_err(|_|JsValue::null())?));
+
+
+
     let global = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
 
     let worker = global.clone();

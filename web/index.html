@@ -50,7 +50,11 @@
 
     <!-- run synchronous -->
     <script type="module">
-            import init, { git_version } from "./ruwasm.js";
+            console.log("About to load");
+            let worker = new Worker("./ruwasm.js", {type: "module"});
+            console.log("Loaded");
+            /*
+            import init from "./ruwasm.js";
             await init();
             console.log("WASM initialized (says js) with WASM version ", git_version());
             // TODO: check WASM version against HTML version. Should match.
@@ -61,6 +65,7 @@
                         + "<br>WASM built by Rust version: " + rustc_version()
                     );
             }
+            */
     </script>
 </body>
 </html>
