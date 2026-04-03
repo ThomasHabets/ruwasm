@@ -67,7 +67,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
     {
         let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
             web_sys::console::log_1(&"ping button clicked".into());
-            worker().post_message(&to_value(&MainToWorker::Ping)?)?;
+            worker().post_message(&to_value(&MainToWorker::Eof)?)?;
             Ok(())
         });
         let btn = get_element("btn-ping")?.dyn_into::<web_sys::HtmlButtonElement>()?;
@@ -227,9 +227,11 @@ fn read_file_in_chunks(
                 // TODO: stream it instead.
                 //let a = crate::radio_wrap_1200(&whole_file.borrow()).unwrap();
                 let bytes = whole_file.borrow();
+                /*
                 worker()
                     .post_message(&to_value(&MainToWorker::Data(bytes.to_vec())).unwrap())
                     .unwrap();
+                    */
                 //log(&format!("Output: {a}"));
                 //set_content(ID_RESULT, &a).unwrap();
                 return;
@@ -273,6 +275,9 @@ fn read_file_in_chunks(
                     let bytes = Uint8Array::new(&result);
                     let v = uint8array_to_vec(&bytes);
                     whole_file_inner.borrow_mut().extend(&v);
+                    worker()
+                        .post_message(&to_value(&MainToWorker::Data(v)).unwrap())
+                        .unwrap();
                     //tx.send(v).unwrap();
                     post_chunk_message(&file_name, chunk_index, start, end, is_last, &bytes);
 
@@ -302,6 +307,9 @@ fn read_file_in_chunks(
 
 fn post_eof() {
     log("Post EOF");
+    worker()
+        .post_message(&to_value(&MainToWorker::Eof).unwrap())
+        .unwrap();
 }
 
 fn post_chunk_message(

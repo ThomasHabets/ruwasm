@@ -32,14 +32,28 @@ thread_local! {
 async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> Result<(), JsValue> {
     match from_value::<MainToWorker>(event.data()).expect("parsing MainToWorker message") {
         MainToWorker::Data(data) => {
+            log(&format!("Worker: Got data len {}", data.len()));
+            GRAPH_COMMS.with(|cell| {
+                let cell = cell.clone();
+                let comms = cell.get().unwrap().clone();
+                spawn_local(async move {
+                    //let mut comms: &mut GraphComms = &mut RefCell::borrow_mut(&comms);
+                    let comms = &mut RefCell::borrow_mut(&comms);
+                    //let mut comms = comms.borrow_mut();
+                    comms.src.send(wasm_source::Msg::Extend(data)).unwrap();
+                    comms.graph.send(()).await.unwrap();
+                });
+            });
+            /*
             let o = radio_1200(&data).await.expect("rustradio run failed");
             log(&format!("Worker run returned: {o}"));
             scope
                 .post_message(&to_value(&WorkerToMain::Result(o)).expect("failed to serialize"))
                 .expect("failed to post message");
+                */
         }
-        MainToWorker::Ping => {
-            log("Worker: Got ping");
+        MainToWorker::Eof => {
+            log("Worker: Got EOF");
             GRAPH_COMMS.with(|cell| {
                 let cell = cell.clone();
                 let comms = cell.get().unwrap().clone();
@@ -51,6 +65,22 @@ async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> R
                     comms.graph.send(()).await.unwrap();
                 });
             });
+        }
+        MainToWorker::Ping => {
+            log("Worker: Got ping");
+            /*
+            GRAPH_COMMS.with(|cell| {
+                let cell = cell.clone();
+                let comms = cell.get().unwrap().clone();
+                spawn_local(async move {
+                    //let mut comms: &mut GraphComms = &mut RefCell::borrow_mut(&comms);
+                    let comms = &mut RefCell::borrow_mut(&comms);
+                    //let mut comms = comms.borrow_mut();
+                    comms.src.send(wasm_source::Msg::Eof).unwrap();
+                    comms.graph.send(()).await.unwrap();
+                });
+            });
+            */
         }
         MainToWorker::Pong => {}
     }
@@ -77,6 +107,13 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
     onmessage.forget();
     global.post_message(&to_value(&WorkerToMain::Ready)?)?;
     log("Done setting up worker");
+
+    // Run the decoder.
+    let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
+    let o = radio_1200(&[]).await.expect("rustradio run failed");
+    scope
+        .post_message(&to_value(&WorkerToMain::Result(o)).expect("failed to serialize"))
+        .expect("failed to post message");
     Ok(())
 }
 

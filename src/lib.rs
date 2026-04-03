@@ -23,6 +23,7 @@ extern "C" {
 #[serde(tag = "type", content = "data")]
 enum MainToWorker {
     Data(Vec<u8>),
+    Eof,
     Ping,
     Pong,
 }
