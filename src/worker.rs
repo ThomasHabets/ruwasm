@@ -7,11 +7,12 @@ use rustradio::blocks::*;
 use rustradio::graph::{Graph, GraphRunner};
 
 use futures::SinkExt;
-use futures::channel::mpsc;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
+// use futures::channel::mpsc;
+use futures_channel::mpsc;
 //use wasmer_types::lib::std::sync::mpsc;
 //use tokio::sync::mpsc;
 
@@ -21,7 +22,7 @@ use crate::{MainToWorker, WorkerToMain};
 
 struct GraphComms {
     src: std::sync::mpsc::Sender<crate::wasm_source::Msg>,
-    graph: mpsc::Sender<()>,
+    graph: async_channel::Sender<()>,
 }
 
 thread_local! {
@@ -152,7 +153,7 @@ async fn radio_1200(data: &[u8]) -> rustradio::Result<String> {
     ];
 
     // TODO: magic value.
-    let (tx, rx) = mpsc::channel(10);
+    let (tx, rx) = async_channel::unbounded();
     GRAPH_COMMS.with(|cell| {
         cell.get_or_init(move || {
             Rc::new(RefCell::new(GraphComms {
