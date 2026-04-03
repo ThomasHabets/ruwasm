@@ -15,12 +15,9 @@ impl WasmGraph {
     pub fn new() -> Self {
         Self { blocks: vec![] }
     }
-    pub async fn run_async(
-        &mut self,
-        mut rx: async_channel::Receiver<()>,
-    ) -> rustradio::Result<()> {
+    pub async fn run_async(&mut self, rx: async_channel::Receiver<()>) -> rustradio::Result<()> {
         let mut eof = vec![false; self.blocks.len()];
-        let mut rx = Box::pin(rx);
+        let rx = Box::pin(rx);
         loop {
             let mut done = true;
             let mut need_more = false;

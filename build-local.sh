@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# RUSTFLAGS2='-C target-feature=+atomics,+bulk-memory,+mutable-globals'
+#
 WEBD="web"
 PREFIX="ruwasm"
 TMPD="$(mktemp -d)"

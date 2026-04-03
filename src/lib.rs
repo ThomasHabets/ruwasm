@@ -24,16 +24,16 @@ extern "C" {
 enum MainToWorker {
     Data(Vec<u8>),
     Eof,
-    Ping,
-    Pong,
+    Ping(f64),
+    Pong(f64),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 enum WorkerToMain {
     Ready,
-    Ping,
-    Pong,
+    Ping(f64),
+    Pong(f64),
     Result(String),
 }
 

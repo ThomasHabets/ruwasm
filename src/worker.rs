@@ -37,20 +37,18 @@ async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> R
                 let cell = cell.clone();
                 let comms = cell.get().unwrap().clone();
                 spawn_local(async move {
-                    //let mut comms: &mut GraphComms = &mut RefCell::borrow_mut(&comms);
                     let comms = &mut RefCell::borrow_mut(&comms);
-                    //let mut comms = comms.borrow_mut();
-                    comms.src.send(wasm_source::Msg::Extend(data)).unwrap();
-                    comms.graph.send(()).await.unwrap();
+                    comms
+                        .src
+                        .send(wasm_source::Msg::Extend(data))
+                        .expect("Worker failed to send data to the wasm source");
+                    comms
+                        .graph
+                        .send(())
+                        .await
+                        .expect("Worker failed to send bump to graph");
                 });
             });
-            /*
-            let o = radio_1200(&data).await.expect("rustradio run failed");
-            log(&format!("Worker run returned: {o}"));
-            scope
-                .post_message(&to_value(&WorkerToMain::Result(o)).expect("failed to serialize"))
-                .expect("failed to post message");
-                */
         }
         MainToWorker::Eof => {
             log("Worker: Got EOF");
@@ -66,23 +64,16 @@ async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> R
                 });
             });
         }
-        MainToWorker::Ping => {
+        MainToWorker::Ping(t) => {
             log("Worker: Got ping");
-            /*
-            GRAPH_COMMS.with(|cell| {
-                let cell = cell.clone();
-                let comms = cell.get().unwrap().clone();
-                spawn_local(async move {
-                    //let mut comms: &mut GraphComms = &mut RefCell::borrow_mut(&comms);
-                    let comms = &mut RefCell::borrow_mut(&comms);
-                    //let mut comms = comms.borrow_mut();
-                    comms.src.send(wasm_source::Msg::Eof).unwrap();
-                    comms.graph.send(()).await.unwrap();
-                });
-            });
-            */
+            scope
+                .post_message(&to_value(&WorkerToMain::Pong(t)).unwrap())
+                .expect("worker failed to send pong");
         }
-        MainToWorker::Pong => {}
+        MainToWorker::Pong(from) => {
+            let to = crate::now();
+            log(&format!("Worker: Got Pong {from} -> {to}: {}", to - from));
+        }
     }
     Ok(())
 }

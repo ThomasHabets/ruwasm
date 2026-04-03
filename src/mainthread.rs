@@ -44,8 +44,16 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
             set_content(ID_RESULT, &s)?;
             web_sys::console::log_1(&format!("worker returned: {s}").into());
         }
-        WorkerToMain::Ping => {}
-        WorkerToMain::Pong => {}
+        WorkerToMain::Ping(t) => {
+            worker()
+                .post_message(&to_value(&MainToWorker::Pong(t)).unwrap())
+                .unwrap();
+        }
+        WorkerToMain::Pong(from) => {
+            let to = crate::now();
+            log(&format!("Main: Got Pong {from} -> {to}: {}", to - from));
+            set_content(ID_RESULT, &format!("Ping RTT: {}", to - from))?;
+        }
     }
     Ok(())
 }
@@ -67,7 +75,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
     {
         let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
             web_sys::console::log_1(&"ping button clicked".into());
-            worker().post_message(&to_value(&MainToWorker::Eof)?)?;
+            worker().post_message(&to_value(&MainToWorker::Ping(crate::now()))?)?;
             Ok(())
         });
         let btn = get_element("btn-ping")?.dyn_into::<web_sys::HtmlButtonElement>()?;
@@ -302,7 +310,11 @@ fn post_chunk_message(
     _is_last: bool,
     data: Vec<u8>,
 ) {
-    log(&format!("Main: Post chunk message of len {}. Percent: {}", data.len(), 100*start / file_size));
+    log(&format!(
+        "Main: Post chunk message of len {}. Percent: {}",
+        data.len(),
+        100 * start / file_size
+    ));
     worker()
         .post_message(&to_value(&MainToWorker::Data(data)).unwrap())
         .unwrap();
