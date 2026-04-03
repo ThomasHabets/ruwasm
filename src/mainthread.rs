@@ -7,6 +7,7 @@ use std::sync::mpsc;
 
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::spawn_local;
 use web_sys::js_sys::Uint8Array;
 use web_sys::{
     Element, Event, File, FileReader, HtmlInputElement, MessageEvent, ProgressEvent, Worker,
@@ -32,6 +33,49 @@ extern "C" {
 thread_local! {
     static WORKER: OnceCell<Worker> = const { OnceCell::new() };
 }
+
+async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
+    match from_value::<WorkerToMain>(e.data())? {
+        WorkerToMain::Ready => {
+            log("Received WorkerToMain::Ready");
+            worker_msg_ready().await?;
+        }
+        WorkerToMain::Result(s) => {
+            set_content(ID_RESULT, &s)?;
+            web_sys::console::log_1(&format!("worker returned: {s}").into());
+        }
+        WorkerToMain::Ping => {}
+        WorkerToMain::Pong => {}
+    }
+    Ok(())
+}
+
+async fn worker_msg_ready() -> Result<(), JsValue> {
+    // Set up Add button.
+    {
+        let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
+            web_sys::console::log_1(&"button clicked".into());
+            set_content(ID_RESULT, &format!("Result of add: {}", crate::add(3, 5)))
+        });
+        let btn = get_element("btn-add")?.dyn_into::<web_sys::HtmlButtonElement>()?;
+        btn.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())?;
+        btn.remove_attribute(HTML_DISABLED)?;
+        handler.forget();
+    }
+
+    // Set up file input thing.
+    {
+        let input = get_element(ID_FILE_INPUT)?.dyn_into::<HtmlInputElement>()?;
+        input.set_disabled(false);
+        // TODO: make some sort of UI friendly bounded channel. Don't want it to
+        // block.
+        let (tx, _rx) = mpsc::channel();
+        log("install");
+        install_file_chunk_listener(input, tx, 64 * 1024)?; // 64 KiB chunks
+    }
+    Ok(())
+}
+
 fn worker() -> Worker {
     WORKER.with(|cell| {
         cell.get_or_init(|| {
@@ -39,26 +83,16 @@ fn worker() -> Worker {
             opts.set_type(web_sys::WorkerType::Module);
             let worker = Worker::new_with_options("./worker.js", &opts).unwrap();
 
+            // TODO: magic value.
             let onmessage = Closure::<dyn FnMut(MessageEvent) -> Result<(), JsValue>>::new(
                 move |e: MessageEvent| {
-                    match from_value::<WorkerToMain>(e.data())? {
-                        WorkerToMain::Ready => {
-                            log("Received WorkerToMain::Ready");
+                    spawn_local(async move {
+                        if let Err(e) = worker_msg(e).await {
+                            // TODO: Surface error on page.
+                            log(&format!("Inner receiver thing: {e:?}"));
                         }
-                        WorkerToMain::Result(s) => {
-                            set_content(ID_RESULT, &s)?;
-                            web_sys::console::log_1(&format!("worker returned: {s}").into());
-                        }
-                        WorkerToMain::Ping => {}
-                        WorkerToMain::Pong => {}
-                    }
+                    });
                     Ok(())
-                    /*
-                    let data = js_sys::Uint8Array::new(&e.data());
-                    let mut buf = vec![0; data.length() as usize];
-                    data.copy_to(&mut buf);
-                    web_sys::console::log_1(&format!("main got: {:?}", buf).into());
-                    */
                 },
             );
 
@@ -90,7 +124,7 @@ fn set_content(id: &str, content: &str) -> Result<(), JsValue> {
     Ok(())
 }
 
-pub(crate) fn setup() -> Result<(), JsValue> {
+pub(crate) async fn setup() -> Result<(), JsValue> {
     // Init the worker.
     worker();
     // TODO: wait for worker to be ready.
@@ -119,28 +153,6 @@ WASM built by Rust version: {}"#,
         ),
     )?;
 
-    // Set up Add button.
-    {
-        let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
-            web_sys::console::log_1(&"button clicked".into());
-            set_content(ID_RESULT, &format!("Result of add: {}", crate::add(3, 5)))
-        });
-        let btn = get_element("btn-add")?.dyn_into::<web_sys::HtmlButtonElement>()?;
-        btn.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())?;
-        btn.remove_attribute(HTML_DISABLED)?;
-        handler.forget();
-    }
-
-    // Set up file input thing.
-    {
-        let input = get_element(ID_FILE_INPUT)?.dyn_into::<HtmlInputElement>()?;
-        input.set_disabled(false);
-        // TODO: make some sort of UI friendly bounded channel. Don't want it to
-        // block.
-        let (tx, _rx) = mpsc::channel();
-        log("install");
-        install_file_chunk_listener(input, tx, 64 * 1024)?; // 64 KiB chunks
-    }
     Ok(())
 }
 

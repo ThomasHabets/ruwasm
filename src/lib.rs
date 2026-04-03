@@ -53,7 +53,7 @@ pub async fn start() -> Result<(), JsValue> {
         worker::setup().await?;
         return Ok(());
     };
-    mainthread::setup()
+    mainthread::setup().await
 }
 
 #[wasm_bindgen]

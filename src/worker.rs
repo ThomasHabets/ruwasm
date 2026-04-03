@@ -3,40 +3,41 @@ use rustradio::blocks::*;
 use rustradio::graph::{Graph, GraphRunner};
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::spawn_local;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
 use crate::log;
 use crate::{MainToWorker, WorkerToMain};
 
+async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> Result<(), JsValue> {
+    match from_value::<MainToWorker>(event.data()).expect("parsing MainToWorker message") {
+        MainToWorker::Data(data) => {
+            let o = radio_1200(&data).await.expect("rustradio run failed");
+            log(&format!("Worker run returned: {o}"));
+            scope
+                .post_message(&to_value(&WorkerToMain::Result(o)).expect("failed to serialize"))
+                .expect("failed to post message");
+        }
+        MainToWorker::Ping => {}
+        MainToWorker::Pong => {}
+    }
+    Ok(())
+}
+
 pub(crate) async fn setup() -> Result<(), JsValue> {
     log("Setting up worker");
+
     let global = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
 
     let worker = global.clone();
     let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
-        match from_value::<MainToWorker>(event.data()).expect("parsing MainToWorker message") {
-            MainToWorker::Data(data) => {
-                let o = radio_1200(&data).expect("rustradio run failed");
-                log(&format!("Worker run returned: {o}"));
-                worker
-                    .post_message(&to_value(&WorkerToMain::Result(o)).expect("failed to serialize"))
-                    .expect("failed to post message");
+        let worker = worker.clone();
+        spawn_local(async move {
+            if let Err(e) = worker_msg(worker, event).await {
+                // TODO: send error.
+                log(&format!("Worker message handler failed: {e:?}"));
             }
-            MainToWorker::Ping => {}
-            MainToWorker::Pong => {}
-        }
-        /*
-        if let Some(text) = event.data().as_string() {
-            web_sys::console::log_1(&format!("worker received: {text}").into());
-
-            let reply = format!("pong: {text}");
-            worker.post_message(&JsValue::from_str(&reply)).unwrap();
-        } else {
-            worker
-                .post_message(&JsValue::from_str("worker got non-string message"))
-                .unwrap();
-        }
-        */
+        });
     });
 
     global.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
@@ -46,7 +47,7 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
     Ok(())
 }
 
-fn radio_1200(data: &[u8]) -> rustradio::Result<String> {
+async fn radio_1200(data: &[u8]) -> rustradio::Result<String> {
     log(&format!("AX.25 1200 decode of {} bytes", data.len()));
     let samp_rate = 50_000.0;
     let if_rate = 50_000.0;
