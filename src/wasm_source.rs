@@ -1,38 +1,60 @@
+use std::sync::mpsc;
+
 use rustradio::Result;
 use rustradio::block::{Block, BlockRet};
 use rustradio::stream::{ReadStream, WriteStream, new_stream};
+
+pub enum Msg {
+    Eof,
+    Extend(Vec<u8>),
+}
 
 #[derive(rustradio_macros::Block)]
 pub struct WasmSource {
     buf: Vec<u8>,
     eof: bool,
+    rx: mpsc::Receiver<Msg>,
     #[rustradio(out)]
     dst: WriteStream<u8>,
 }
 
 impl WasmSource {
-    pub fn new() -> (Self, ReadStream<u8>) {
+    pub fn new() -> (Self, ReadStream<u8>, mpsc::Sender<Msg>) {
+        let (tx, rx) = mpsc::channel();
         let (dst, src) = new_stream();
         (
             Self {
                 buf: vec![],
                 dst,
                 eof: false,
+                rx,
             },
             src,
+            tx,
         )
     }
-    pub fn set_eof(&mut self) {
+    fn set_eof(&mut self) {
         self.eof = true;
     }
-    pub fn extend(&mut self, data: &[u8]) {
+    fn extend(&mut self, data: &[u8]) {
         self.buf.extend(data);
+    }
+    fn check_msgs(&mut self) {
+        loop {
+            match self.rx.try_recv() {
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => break,
+                Ok(Msg::Eof) => self.set_eof(),
+                Ok(Msg::Extend(v)) => self.extend(&v),
+            }
+        }
     }
 }
 
 impl Block for WasmSource {
     fn work(&mut self) -> Result<BlockRet<'_>> {
         loop {
+            self.check_msgs();
             if self.buf.is_empty() {
                 if self.eof {
                     return Ok(BlockRet::EOF);

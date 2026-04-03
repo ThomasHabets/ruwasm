@@ -1,13 +1,32 @@
+use std::cell::OnceCell;
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use rustradio::blockchain;
 use rustradio::blocks::*;
 use rustradio::graph::{Graph, GraphRunner};
+
+use futures::SinkExt;
+use futures::channel::mpsc;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
+//use wasmer_types::lib::std::sync::mpsc;
+//use tokio::sync::mpsc;
 
 use crate::log;
+use crate::wasm_source;
 use crate::{MainToWorker, WorkerToMain};
+
+struct GraphComms {
+    src: std::sync::mpsc::Sender<crate::wasm_source::Msg>,
+    graph: mpsc::Sender<()>,
+}
+
+thread_local! {
+    static GRAPH_COMMS: OnceCell<Rc<RefCell<GraphComms>>> = const { OnceCell::new() };
+}
 
 async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> Result<(), JsValue> {
     match from_value::<MainToWorker>(event.data()).expect("parsing MainToWorker message") {
@@ -18,7 +37,20 @@ async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> R
                 .post_message(&to_value(&WorkerToMain::Result(o)).expect("failed to serialize"))
                 .expect("failed to post message");
         }
-        MainToWorker::Ping => {}
+        MainToWorker::Ping => {
+            log("Worker: Got ping");
+            GRAPH_COMMS.with(|cell| {
+                let cell = cell.clone();
+                let comms = cell.get().unwrap().clone();
+                spawn_local(async move {
+                    //let mut comms: &mut GraphComms = &mut RefCell::borrow_mut(&comms);
+                    let comms = &mut RefCell::borrow_mut(&comms);
+                    //let mut comms = comms.borrow_mut();
+                    comms.src.send(wasm_source::Msg::Eof).unwrap();
+                    comms.graph.send(()).await.unwrap();
+                });
+            });
+        }
         MainToWorker::Pong => {}
     }
     Ok(())
@@ -62,11 +94,17 @@ async fn radio_1200(data: &[u8]) -> rustradio::Result<String> {
     let max_deviation = 0.1;
 
     // Set up source part.
-    let mut g = Graph::new();
+    let mut g = crate::wasm_graph::WasmGraph::new();
     //let src = VectorSource::new(data.to_vec());
-    let (mut src, prev) = crate::wasm_source::WasmSource::new();
-    src.set_eof();
-    src.extend(data);
+    let (src, prev, src_tx) = crate::wasm_source::WasmSource::new();
+    /*
+    src_tx
+        .send(crate::wasm_source::Msg::Eof)
+        .map_err(|_| rustradio::Error::msg("src_tx send eof"))?;
+        */
+    src_tx
+        .send(crate::wasm_source::Msg::Extend(data.to_vec()))
+        .map_err(|_| rustradio::Error::msg("src_tx send extend"))?;
     g.add(Box::new(src));
 
     // Set up rest of decoder graph.
@@ -113,8 +151,19 @@ async fn radio_1200(data: &[u8]) -> rustradio::Result<String> {
         HdlcDeframer::new(prev, 10, 1500),
     ];
 
+    // TODO: magic value.
+    let (tx, rx) = mpsc::channel(10);
+    GRAPH_COMMS.with(|cell| {
+        cell.get_or_init(move || {
+            Rc::new(RefCell::new(GraphComms {
+                src: src_tx,
+                graph: tx,
+            }))
+        });
+    });
     log(&format!("Running graph"));
-    g.run()
+    g.run_async(rx)
+        .await
         .map_err(|e| rustradio::Error::wrap(e, "graph run"))?;
     let mut outs = Vec::new();
     while let Some(p) = prev.pop() {

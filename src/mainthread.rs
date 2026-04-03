@@ -63,6 +63,19 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
         handler.forget();
     }
 
+    // Set up Ping button.
+    {
+        let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
+            web_sys::console::log_1(&"ping button clicked".into());
+            worker().post_message(&to_value(&MainToWorker::Ping)?)?;
+            Ok(())
+        });
+        let btn = get_element("btn-ping")?.dyn_into::<web_sys::HtmlButtonElement>()?;
+        btn.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())?;
+        btn.remove_attribute(HTML_DISABLED)?;
+        handler.forget();
+    }
+
     // Set up file input thing.
     {
         let input = get_element(ID_FILE_INPUT)?.dyn_into::<HtmlInputElement>()?;
