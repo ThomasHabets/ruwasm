@@ -52,7 +52,7 @@
     <script type="module">
             import init, { git_version } from "./ruwasm.js";
             await init();
-            console.log("WASM initialized (says js) with WASM version ", git_version());
+            console.log("JS: WASM initialized with WASM version ", git_version());
             // TODO: check WASM version against HTML version. Should match.
             if (false) {
                     document.getElementById("result").innerHTML = (

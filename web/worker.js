@@ -1,4 +1,4 @@
-import init, { git_version, compute } from "./ruwasm.js";
+import init, { git_version } from "./ruwasm.js";
 
 let wasm_ready = init();
 await wasm_ready;

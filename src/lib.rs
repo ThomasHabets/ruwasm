@@ -14,33 +14,53 @@ extern "C" {
     fn now() -> f64;
 }
 
+/// Messages going from main (UI) thread to worker.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 enum MainToWorker {
+    /// Data going to a WasmSource.
+    ///
+    /// TODO: allow for multiple incoming streams, by identifying them somehow.
     Data(Vec<u8>),
+
+    /// Inform that stream has ended.
+    ///
+    /// TODO: allow for multiple incoming streams, by identifying them somehow.
     Eof,
+
+    /// Send a ping with a `performance.now()` timestamp.
+    /// The timestamp will be reflected in the Pong.
     Ping(f64),
+
+    /// Reply to a ping from the worker.
+    ///
+    /// Original ping timestamp is returned.
     Pong(f64),
 }
 
+/// Messages from the worker to the main (UI) thread.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 enum WorkerToMain {
     Ready,
+
+    /// Send a ping with a `performance.now()` timestamp.
+    /// The timestamp will be reflected in the Pong.
     Ping(f64),
+
+    /// Reply to a ping from the main thread.
+    ///
+    /// Original ping timestamp is returned.
     Pong(f64),
+
+    /// At the end of execution, provide the result as a string.
     Result(String),
 }
 
-#[wasm_bindgen]
-#[derive(Serialize)]
-pub struct Return {
-    a: i32,
-    b: i32,
-    sum: i32,
-    eval: String,
-}
-
+/// Entry point for both worker and main thread.
+///
+/// This function is run for both, and it does common initialization and then
+/// calls out to the respective special setups.
 #[wasm_bindgen(start)]
 pub async fn start() -> Result<(), JsValue> {
     console_log::init_with_level(log::Level::Debug).expect("Failed to init logging");
@@ -58,6 +78,7 @@ pub async fn start() -> Result<(), JsValue> {
     }
 }
 
+/// Get a descriptive git string for the current code.
 #[wasm_bindgen]
 pub fn git_version() -> String {
     rustradio::sys::initialize_rustradio();
@@ -65,27 +86,16 @@ pub fn git_version() -> String {
     env!("GIT_VERSION").to_string()
 }
 
+/// Get the version of the Rust compiler that built this.
 #[wasm_bindgen]
 pub fn rustc_version() -> String {
     env!("RUSTC_VERSION").to_string()
 }
 
 #[wasm_bindgen]
-pub fn compute(n: u32) -> u32 {
-    info!("From rust: compute() called");
-    (0..n).map(|x| x * x).sum()
-}
-
-#[wasm_bindgen]
 pub fn add(a: i32, b: i32) -> String {
     info!("Hello world, adding {a} and {b}");
-    serde_json::to_string(&Return {
-        a,
-        b,
-        sum: a + b,
-        eval: "console.log('hello world')".to_string(),
-    })
-    .unwrap()
+    format!("Add results: {}", a + b)
 }
 
 pub(crate) fn uint8array_to_vec(arr: &Uint8Array) -> Vec<u8> {
