@@ -49,6 +49,8 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
 
 async fn radio_1200(data: &[u8]) -> rustradio::Result<String> {
     log(&format!("AX.25 1200 decode of {} bytes", data.len()));
+
+    // Decoder parameters.
     let samp_rate = 50_000.0;
     let if_rate = 50_000.0;
     let baud = 1200.0;
@@ -58,11 +60,19 @@ async fn radio_1200(data: &[u8]) -> rustradio::Result<String> {
     //let symbol_taps = vec![0.0001, 0.9999];
     let symbol_taps = vec![1.0];
     let max_deviation = 0.1;
+
+    // Set up source part.
     let mut g = Graph::new();
+    //let src = VectorSource::new(data.to_vec());
+    let (mut src, prev) = crate::wasm_source::WasmSource::new();
+    src.set_eof();
+    src.extend(data);
+    g.add(Box::new(src));
+
+    // Set up rest of decoder graph.
     let prev = blockchain![
         g,
         prev,
-        VectorSource::new(data.to_vec()),
         Parse::new(prev),
         FftFilter::new(
             prev,

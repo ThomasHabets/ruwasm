@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 console_error_panic_hook = "0.1.7"
 rustradio = { version = "0.16.0", features = ["wasm"] }
+rustradio_macros = "0.16.0"
 #rustradio = { path = "../rustradio", features = ["wasm"] }
 #rustradio = { git = "https://github.com/ThomasHabets/rustradio", branch = "wasm", features = ["wasm"] }
 serde = { version = "1.0.219", features = ["derive"] }

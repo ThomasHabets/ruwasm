@@ -7,6 +7,7 @@ use rustradio::blocks::*;
 use rustradio::graph::{Graph, GraphRunner};
 
 mod mainthread;
+mod wasm_source;
 mod worker;
 
 #[wasm_bindgen]
