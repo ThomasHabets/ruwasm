@@ -260,7 +260,7 @@ fn read_file_in_chunks(
 
                     let bytes = Uint8Array::new(&result);
                     let v = uint8array_to_vec(&bytes);
-                    post_chunk_message(&file_name, chunk_index, start, end, is_last, v);
+                    post_chunk_message(&file_name, chunk_index, start, end, file_size, is_last, v);
 
                     *next_offset.borrow_mut() = end;
 
@@ -296,12 +296,13 @@ fn post_eof() {
 fn post_chunk_message(
     _file_name: &str,
     _chunk_index: u32,
-    _start: u64,
+    start: u64,
     _end: u64,
+    file_size: u64,
     _is_last: bool,
     data: Vec<u8>,
 ) {
-    log(&format!("Main: Post chunk message of len {}", data.len()));
+    log(&format!("Main: Post chunk message of len {}. Percent: {}", data.len(), 100*start / file_size));
     worker()
         .post_message(&to_value(&MainToWorker::Data(data)).unwrap())
         .unwrap();

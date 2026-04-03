@@ -32,7 +32,7 @@ thread_local! {
 async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> Result<(), JsValue> {
     match from_value::<MainToWorker>(event.data()).expect("parsing MainToWorker message") {
         MainToWorker::Data(data) => {
-            log(&format!("Worker: Got data len {}", data.len()));
+            //log(&format!("Worker: Got data len {}", data.len()));
             GRAPH_COMMS.with(|cell| {
                 let cell = cell.clone();
                 let comms = cell.get().unwrap().clone();
