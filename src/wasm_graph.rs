@@ -60,6 +60,10 @@ impl WasmGraph {
                 //log("Graph: About to wait for more somethings");
                 if let Err(e) = rx.recv().await {
                     log(&format!("Graph: recv error: {e:?}"));
+                    // This can only happen if the sender crashed. If the worker
+                    // crashed, then there's no point in continuing the graph
+                    // connected to nothing.
+                    return Err(rustradio::Error::msg("recv()"));
                 }
             }
         }
