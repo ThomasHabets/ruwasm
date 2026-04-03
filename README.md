@@ -11,3 +11,7 @@ clear \
 ```
 
 `--dev` in order to get backtraces.
+
+## Useful links
+
+* <https://notes.brooklynzelenka.com/Blog/Notes-on-Writing-Wasm>
