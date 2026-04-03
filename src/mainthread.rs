@@ -260,11 +260,7 @@ fn read_file_in_chunks(
 
                     let bytes = Uint8Array::new(&result);
                     let v = uint8array_to_vec(&bytes);
-                    worker()
-                        .post_message(&to_value(&MainToWorker::Data(v)).unwrap())
-                        .unwrap();
-                    //tx.send(v).unwrap();
-                    post_chunk_message(&file_name, chunk_index, start, end, is_last, &bytes);
+                    post_chunk_message(&file_name, chunk_index, start, end, is_last, v);
 
                     *next_offset.borrow_mut() = end;
 
@@ -291,7 +287,7 @@ fn read_file_in_chunks(
 }
 
 fn post_eof() {
-    log("Post EOF");
+    log("Main: Post EOF");
     worker()
         .post_message(&to_value(&MainToWorker::Eof).unwrap())
         .unwrap();
@@ -300,14 +296,14 @@ fn post_eof() {
 fn post_chunk_message(
     _file_name: &str,
     _chunk_index: u32,
-    start: u64,
-    end: u64,
+    _start: u64,
+    _end: u64,
     _is_last: bool,
-    _bytes: &Uint8Array,
+    data: Vec<u8>,
 ) {
-    log(&format!(
-        "Post chunk message not yet implemented, of len {}",
-        end - start
-    ));
+    log(&format!("Main: Post chunk message of len {}", data.len()));
+    worker()
+        .post_message(&to_value(&MainToWorker::Data(data)).unwrap())
+        .unwrap();
     //todo!()
 }
