@@ -1,3 +1,4 @@
+use log::info;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -48,11 +49,14 @@ pub struct Return {
 
 #[wasm_bindgen(start)]
 pub async fn start() -> Result<(), JsValue> {
-    log(&format!("ruwasm: Starting at time {}", now()));
+    console_log::init_with_level(log::Level::Debug).expect("Failed to init logging");
+    info!("Logging initialized");
+
+    info!("ruwasm: Starting at time {}", now());
     console_error_panic_hook::set_once();
 
     if web_sys::window().is_none() {
-        log("No window. Probably running in worker");
+        info!("No window. Probably running in worker");
         worker::setup().await?;
         return Ok(());
     };
@@ -62,7 +66,7 @@ pub async fn start() -> Result<(), JsValue> {
 #[wasm_bindgen]
 pub fn git_version() -> String {
     rustradio::sys::initialize_rustradio();
-    log(&format!("git_version() called"));
+    info!("git_version() called");
     env!("GIT_VERSION").to_string()
 }
 
@@ -73,13 +77,13 @@ pub fn rustc_version() -> String {
 
 #[wasm_bindgen]
 pub fn compute(n: u32) -> u32 {
-    log(&format!("From rust: compute() called"));
+    info!("From rust: compute() called");
     (0..n).map(|x| x * x).sum()
 }
 
 #[wasm_bindgen]
 pub fn add(a: i32, b: i32) -> String {
-    log(&format!("Hello world, adding {a} and {b}"));
+    info!("Hello world, adding {a} and {b}");
     serde_json::to_string(&Return {
         a,
         b,
@@ -105,7 +109,7 @@ pub(crate) fn uint8array_to_vec(arr: &Uint8Array) -> Vec<u8> {
 }
 
 pub(crate) fn radio_wrap_1200(data: &[u8]) -> rustradio::Result<String> {
-    log(&format!("AX.25 1200 decode of {} bytes", data.len()));
+    info!("AX.25 1200 decode of {} bytes", data.len());
     let samp_rate = 50_000.0;
     let if_rate = 50_000.0;
     let baud = 1200.0;
@@ -161,7 +165,7 @@ pub(crate) fn radio_wrap_1200(data: &[u8]) -> rustradio::Result<String> {
         HdlcDeframer::new(prev, 10, 1500),
     ];
 
-    log(&format!("Running graph"));
+    info!("Running graph");
     g.run()
         .map_err(|e| rustradio::Error::wrap(e, "graph run"))?;
     let mut outs = Vec::new();
@@ -177,7 +181,7 @@ pub(crate) fn radio_wrap_1200(data: &[u8]) -> rustradio::Result<String> {
 
 #[wasm_bindgen]
 pub fn radio2(a: i32, b: i32) -> String {
-    log(&format!("Hello radio, adding {a} and {b}"));
+    info!("Hello radio, adding {a} and {b}");
     let (mut b1, src1) = VectorSource::new(vec![a]);
     b1.work().unwrap();
     let (mut b2, src2) = VectorSource::new(vec![b]);

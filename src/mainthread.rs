@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc;
 
+use log::info;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
@@ -13,7 +14,6 @@ use web_sys::{
     Element, Event, File, FileReader, HtmlInputElement, MessageEvent, ProgressEvent, Worker,
 };
 
-use crate::log;
 use crate::uint8array_to_vec;
 use crate::{MainToWorker, WorkerToMain};
 
@@ -37,12 +37,12 @@ thread_local! {
 async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
     match from_value::<WorkerToMain>(e.data())? {
         WorkerToMain::Ready => {
-            log("Received WorkerToMain::Ready");
+            info!("Received WorkerToMain::Ready");
             worker_msg_ready().await?;
         }
         WorkerToMain::Result(s) => {
             set_content(ID_RESULT, &s)?;
-            web_sys::console::log_1(&format!("worker returned: {s}").into());
+            info!("worker returned: {s}");
         }
         WorkerToMain::Ping(t) => {
             worker()
@@ -51,7 +51,7 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
         }
         WorkerToMain::Pong(from) => {
             let to = crate::now();
-            log(&format!("Main: Got Pong {from} -> {to}: {}", to - from));
+            info!("Main: Got Pong {from} -> {to}: {}", to - from);
             set_content(ID_RESULT, &format!("Ping RTT: {}", to - from))?;
         }
     }
@@ -62,7 +62,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
     // Set up Add button.
     {
         let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
-            web_sys::console::log_1(&"button clicked".into());
+            info!("button clicked");
             set_content(ID_RESULT, &format!("Result of add: {}", crate::add(3, 5)))
         });
         let btn = get_element("btn-add")?.dyn_into::<web_sys::HtmlButtonElement>()?;
@@ -74,7 +74,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
     // Set up Ping button.
     {
         let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
-            web_sys::console::log_1(&"ping button clicked".into());
+            info!("ping button clicked");
             worker().post_message(&to_value(&MainToWorker::Ping(crate::now()))?)?;
             Ok(())
         });
@@ -91,7 +91,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
         // TODO: make some sort of UI friendly bounded channel. Don't want it to
         // block.
         let (tx, _rx) = mpsc::channel();
-        log("install");
+        info!("Main: installing file chunk handler");
         install_file_chunk_listener(input, tx, 64 * 1024)?; // 64 KiB chunks
     }
     Ok(())
@@ -110,7 +110,7 @@ fn worker() -> Worker {
                     spawn_local(async move {
                         if let Err(e) = worker_msg(e).await {
                             // TODO: Surface error on page.
-                            log(&format!("Inner receiver thing: {e:?}"));
+                            info!("Inner receiver thing: {e:?}");
                         }
                     });
                     Ok(())
@@ -140,7 +140,7 @@ fn get_element(id: &str) -> Result<Element, JsValue> {
 }
 
 fn set_content(id: &str, content: &str) -> Result<(), JsValue> {
-    log(&format!("Setting inner HTML of {id}"));
+    info!("Setting inner HTML of {id}");
     get_element(id)?.set_inner_html(content);
     Ok(())
 }
@@ -157,7 +157,7 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
         let reply = js_sys::Uint8Array::new(&e.data());
         let mut buf = vec![0; reply.length() as usize];
         reply.copy_to(&mut buf);
-        web_sys::console::log_1(&format!("main got: {:?}", buf).into());
+        info!("main got: {:?}", buf);
     });
 
     worker.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
@@ -182,7 +182,7 @@ fn install_file_chunk_listener(
     tx: mpsc::Sender<Vec<u8>>,
     chunk_size: u64,
 ) -> Result<(), JsValue> {
-    log("Adding listener");
+    info!("Adding listener");
     let input = Rc::new(input);
     let input2 = input.clone();
     let on_change =
@@ -194,7 +194,7 @@ fn install_file_chunk_listener(
             let Some(file) = files.get(0) else {
                 return Ok(());
             };
-            log("Read file now!");
+            info!("Read file now!");
             set_content(ID_RESULT, "Running rustradio on input…")?;
             if let Err(err) = read_file_in_chunks(file, tx, chunk_size) {
                 web_sys::console::error_1(&err);
@@ -202,9 +202,9 @@ fn install_file_chunk_listener(
             Ok(())
         }));
 
-    log("Adding event listener");
+    info!("Adding event listener");
     input2.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref())?;
-    log("Done Adding event listener");
+    info!("Done Adding event listener");
     on_change.forget();
     Ok(())
 }
@@ -290,12 +290,12 @@ fn read_file_in_chunks(
     if let Some(f) = read_next.borrow().as_ref() {
         f();
     }
-    log("Read file in chunks done");
+    info!("Read file in chunks done");
     Ok(())
 }
 
 fn post_eof() {
-    log("Main: Post EOF");
+    info!("Main: Post EOF");
     worker()
         .post_message(&to_value(&MainToWorker::Eof).unwrap())
         .unwrap();
@@ -310,11 +310,11 @@ fn post_chunk_message(
     _is_last: bool,
     data: Vec<u8>,
 ) {
-    log(&format!(
+    info!(
         "Main: Post chunk message of len {}. Percent: {}",
         data.len(),
         100 * start / file_size
-    ));
+    );
     worker()
         .post_message(&to_value(&MainToWorker::Data(data)).unwrap())
         .unwrap();

@@ -6,8 +6,10 @@ edition = "2024"
 [dependencies]
 async-channel = "2.5.0"
 console_error_panic_hook = "0.1.7"
+console_log = "1.0.0"
 futures = "0.3.32"
 futures-channel = "0.3.32"
+log = "0.4.29"
 rustradio = { version = "0.16.1", features = ["wasm"] }
 rustradio_macros = "0.16.0"
 #rustradio = { path = "../rustradio", features = ["wasm"] }

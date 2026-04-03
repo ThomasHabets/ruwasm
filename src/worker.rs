@@ -7,6 +7,7 @@ use rustradio::blocks::*;
 use rustradio::graph::{Graph, GraphRunner};
 
 use futures::SinkExt;
+use log::info;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
@@ -16,7 +17,6 @@ use futures_channel::mpsc;
 //use wasmer_types::lib::std::sync::mpsc;
 //use tokio::sync::mpsc;
 
-use crate::log;
 use crate::wasm_source;
 use crate::{MainToWorker, WorkerToMain};
 
@@ -32,7 +32,7 @@ thread_local! {
 async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> Result<(), JsValue> {
     match from_value::<MainToWorker>(event.data()).expect("parsing MainToWorker message") {
         MainToWorker::Data(data) => {
-            //log(&format!("Worker: Got data len {}", data.len()));
+            //info!("Worker: Got data len {}", data.len());
             GRAPH_COMMS.with(|cell| {
                 let cell = cell.clone();
                 let comms = cell.get().unwrap().clone();
@@ -51,7 +51,7 @@ async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> R
             });
         }
         MainToWorker::Eof => {
-            log("Worker: Got EOF");
+            info!("Worker: Got EOF");
             GRAPH_COMMS.with(|cell| {
                 let cell = cell.clone();
                 let comms = cell.get().unwrap().clone();
@@ -65,21 +65,21 @@ async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> R
             });
         }
         MainToWorker::Ping(t) => {
-            log("Worker: Got ping");
+            info!("Worker: Got ping");
             scope
                 .post_message(&to_value(&WorkerToMain::Pong(t)).unwrap())
                 .expect("worker failed to send pong");
         }
         MainToWorker::Pong(from) => {
             let to = crate::now();
-            log(&format!("Worker: Got Pong {from} -> {to}: {}", to - from));
+            info!("Worker: Got Pong {from} -> {to}: {}", to - from);
         }
     }
     Ok(())
 }
 
 pub(crate) async fn setup() -> Result<(), JsValue> {
-    log("Setting up worker");
+    info!("Setting up worker");
 
     let global = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
 
@@ -89,7 +89,7 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
         spawn_local(async move {
             if let Err(e) = worker_msg(worker, event).await {
                 // TODO: send error.
-                log(&format!("Worker message handler failed: {e:?}"));
+                info!("Worker message handler failed: {e:?}");
             }
         });
     });
@@ -97,7 +97,7 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
     global.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
     onmessage.forget();
     global.post_message(&to_value(&WorkerToMain::Ready)?)?;
-    log("Done setting up worker");
+    info!("Done setting up worker");
 
     // Run the decoder.
     let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
@@ -109,7 +109,7 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
 }
 
 async fn radio_1200(data: &[u8]) -> rustradio::Result<String> {
-    log(&format!("AX.25 1200 decode of {} bytes", data.len()));
+    info!("AX.25 1200 decode of {} bytes", data.len());
 
     // Decoder parameters.
     let samp_rate = 50_000.0;
@@ -190,7 +190,7 @@ async fn radio_1200(data: &[u8]) -> rustradio::Result<String> {
             }))
         });
     });
-    log(&format!("Running graph"));
+    info!("Running graph");
     g.run_async(rx)
         .await
         .map_err(|e| rustradio::Error::wrap(e, "graph run"))?;
@@ -208,7 +208,7 @@ async fn radio_1200(data: &[u8]) -> rustradio::Result<String> {
 // TODO: add support for 9600
 #[allow(unused)]
 fn radio_wrap_9600(data: &[u8]) -> rustradio::Result<String> {
-    log(&format!("AX.25 9600 decode of {} bytes", data.len()));
+    info!("AX.25 9600 decode of {} bytes", data.len());
     let samp_rate = 50_000.0;
     let if_rate = 50_000.0;
     let baud = 9600.0;
@@ -249,7 +249,7 @@ fn radio_wrap_9600(data: &[u8]) -> rustradio::Result<String> {
         HdlcDeframer::new(prev, 10, 1500),
     ];
 
-    log(&format!("Running graph"));
+    info!("Running graph");
     g.run()
         .map_err(|e| rustradio::Error::wrap(e, "graph run"))?;
     Ok(match prev.pop() {

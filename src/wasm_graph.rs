@@ -1,4 +1,5 @@
-use crate::log;
+use log::info;
+
 //use futures::channel::mpsc;
 use futures::StreamExt;
 use futures_channel::mpsc;
@@ -30,7 +31,7 @@ impl WasmGraph {
                 match ret {
                     BlockRet::EOF => {
                         eof[n] = true;
-                        log(&format!("Block({name}): EOF"));
+                        info!("Block({name}): EOF");
                     }
                     BlockRet::Again => done = false,
                     // TODO: Skip calling next time if conditions not met?
@@ -43,20 +44,20 @@ impl WasmGraph {
                     }
                     BlockRet::WaitForFunc(_) => {}
                     BlockRet::Pending => {
-                        //log(&format!("Block {name} returned Pending"));
+                        //info!("Block {name} returned Pending");
                         need_more = true;
                         done = false;
                     }
                 }
             }
             if done {
-                log("Wasm graph: All done");
+                info!("Wasm graph: All done");
                 return Ok(());
             }
             if need_more {
-                //log("Graph: About to wait for more somethings");
+                //info!("Graph: About to wait for more somethings");
                 if let Err(e) = rx.recv().await {
-                    log(&format!("Graph: recv error: {e:?}"));
+                    info!("Graph: recv error: {e:?}");
                     // This can only happen if the sender crashed. If the worker
                     // crashed, then there's no point in continuing the graph
                     // connected to nothing.
