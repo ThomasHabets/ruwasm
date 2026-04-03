@@ -213,9 +213,6 @@ fn read_file_in_chunks(
     let read_next: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
     let read_next_clone = Rc::clone(&read_next);
 
-    let whole_file = Rc::new(RefCell::<Vec<u8>>::new(vec![]));
-    let whole_file_inner = whole_file.clone();
-
     *read_next.borrow_mut() = Some(Box::new({
         let offset = Rc::clone(&offset);
         let file = Rc::clone(&file);
@@ -224,16 +221,6 @@ fn read_file_in_chunks(
             let start = *offset.borrow();
             if start >= file_size {
                 post_eof();
-                // TODO: stream it instead.
-                //let a = crate::radio_wrap_1200(&whole_file.borrow()).unwrap();
-                let bytes = whole_file.borrow();
-                /*
-                worker()
-                    .post_message(&to_value(&MainToWorker::Data(bytes.to_vec())).unwrap())
-                    .unwrap();
-                    */
-                //log(&format!("Output: {a}"));
-                //set_content(ID_RESULT, &a).unwrap();
                 return;
             }
 
@@ -262,7 +249,6 @@ fn read_file_in_chunks(
 
             let onload = {
                 let reader = Rc::clone(&reader);
-                let whole_file_inner = Rc::clone(&whole_file_inner);
                 let _tx = tx.clone();
                 Closure::<dyn FnMut(ProgressEvent)>::wrap(Box::new(move |_e: ProgressEvent| {
                     let Ok(result) = reader.result() else {
@@ -274,7 +260,6 @@ fn read_file_in_chunks(
 
                     let bytes = Uint8Array::new(&result);
                     let v = uint8array_to_vec(&bytes);
-                    whole_file_inner.borrow_mut().extend(&v);
                     worker()
                         .post_message(&to_value(&MainToWorker::Data(v)).unwrap())
                         .unwrap();
