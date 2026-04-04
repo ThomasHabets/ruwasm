@@ -24,9 +24,7 @@ pub struct ReceiverId(u64);
 #[serde(tag = "type", content = "data")]
 enum MainToWorker {
     /// Start the graph.
-    Start{
-        samp_rate: u64,
-    },
+    Start { samp_rate: u64 },
 
     /// Data going to a WasmSource or something.
     Data(ReceiverId, Vec<u8>),

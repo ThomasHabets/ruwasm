@@ -15,6 +15,12 @@
       color: #fff;
     }
   }
+  .left-pad {
+          padding-left: 3em;
+  }
+  #form-rr {
+          display: inline-grid;
+  }
 </style>
 </head>
 <body>
@@ -22,14 +28,16 @@
     <h2>Instructions</h2>
     <p>
       First ensure WASM is fully loaded. The buttons should become enabled, and
-      a massage saying "WASM loaded" should show up.
+      a massage with some WASM status gets added to the bottom.
     </p> <p>
       You can click the "add" button to run a simple test, making sure that WASM
-      works.
+      works. "Ping" sends a message all the way to the web worker, and should
+      give the RTT in milliseconds.
     </p> <p>
-      Then you can upload a 50ksps 32bit complex float I/Q via the browse
-      button. Rustradio will run on it, and will give you the bytes for the
-      first 1200bps AX.25 packet decoded.
+      Then you can start the rustradio graph and upload a 32bit complex float
+      I/Q via the browse button. It'll use 50ksps by default. Rustradio will run
+      on it, and will give you the bytes for the first 1200bps AX.25 packet
+      decoded.
     </p>
     <p>
         The <a href="https://github.com/ThomasHabets/ruwasm">code is on github</a>,
@@ -38,11 +46,20 @@
         project.
     </p>
 
+    <h3>Test stuff</h3>
+    <div class="left-pad">
     <button id="btn-add" disabled>Add 5 + 3</button>
     <button id="btn-ping" disabled>Send ping</button>
-    <input id="input-samp-rate" value="50000" />
-    <button id="btn-start" disabled>Start RustRadio graph</button>
+    </div>
+
+    <h3>Rustradio graph</h3>
+    <div id="form-rr" class="left-pad">
+    <label for="input-samp-rate">Sample rate</label>
+    <input id="input-samp-rate" value="50000" /><br/>
+    <button id="btn-start" disabled>Start RustRadio graph</button><br/>
     <input type="file" id="fileInput" disabled />
+    </div>
+
     <h2>From wasm</h2>
     <pre id="result"></pre>
     <!--

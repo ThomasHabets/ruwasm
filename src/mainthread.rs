@@ -21,6 +21,8 @@ use crate::{MainToWorker, WorkerToMain};
 
 const HTML_DISABLED: &str = "disabled";
 const ID_RESULT: &str = "result";
+const ID_START: &str = "btn-start";
+const ID_SAMP_RATE: &str = "input-samp-rate";
 const ID_FILE_INPUT: &str = "fileInput";
 
 thread_local! {
@@ -84,10 +86,21 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
     // Set up Start button.
     {
         let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
-            let samp_rate: u64 = get_element("input-samp-rate")?.dyn_into::<web_sys::HtmlInputElement>()?.value().parse().map_err(|e| JsValue::from_str(&format!("parsing sample rate: {e}")))?;
-            worker().post_message(&to_value(&MainToWorker::Start{samp_rate})?)?;
-            let input = get_element(ID_FILE_INPUT)?.dyn_into::<HtmlInputElement>()?;
-            input.set_disabled(false);
+            let samp_rate: u64 = get_element(ID_SAMP_RATE)?
+                .dyn_into::<web_sys::HtmlInputElement>()?
+                .value()
+                .parse()
+                .map_err(|e| JsValue::from_str(&format!("parsing sample rate: {e}")))?;
+            worker().post_message(&to_value(&MainToWorker::Start { samp_rate })?)?;
+            get_element(ID_FILE_INPUT)?
+                .dyn_into::<HtmlInputElement>()?
+                .set_disabled(false);
+            get_element(ID_START)?
+                .dyn_into::<web_sys::HtmlButtonElement>()?
+                .set_disabled(true);
+            get_element(ID_SAMP_RATE)?
+                .dyn_into::<web_sys::HtmlInputElement>()?
+                .set_disabled(true);
             Ok(())
         });
         let btn = get_element("btn-start")?.dyn_into::<web_sys::HtmlButtonElement>()?;

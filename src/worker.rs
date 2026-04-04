@@ -34,10 +34,12 @@ thread_local! {
 
 async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> Result<(), JsValue> {
     match from_value::<MainToWorker>(event.data()).expect("parsing MainToWorker message") {
-        MainToWorker::Start{samp_rate} => {
+        MainToWorker::Start { samp_rate } => {
             // Run the decoder.
             let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
-            let o = radio_1200(samp_rate, &[]).await.expect("rustradio run failed");
+            let o = radio_1200(samp_rate, &[])
+                .await
+                .expect("rustradio run failed");
             scope
                 .post_message(&to_value(&WorkerToMain::Result(o)).expect("failed to serialize"))
                 .expect("failed to post message");
