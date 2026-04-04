@@ -1,5 +1,6 @@
 use std::cell::OnceCell;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use rustradio::blockchain;
@@ -17,12 +18,13 @@ use futures_channel::mpsc;
 //use wasmer_types::lib::std::sync::mpsc;
 //use tokio::sync::mpsc;
 
+use crate::ReceiverId;
 use crate::js_performance_now;
 use crate::wasm_source;
 use crate::{MainToWorker, WorkerToMain};
 
 struct GraphComms {
-    src: std::sync::mpsc::Sender<crate::wasm_source::Msg>,
+    src: HashMap<ReceiverId, std::sync::mpsc::Sender<crate::wasm_source::Msg>>,
     graph: async_channel::Sender<()>,
 }
 
@@ -32,6 +34,14 @@ thread_local! {
 
 async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> Result<(), JsValue> {
     match from_value::<MainToWorker>(event.data()).expect("parsing MainToWorker message") {
+        MainToWorker::Start{samp_rate} => {
+            // Run the decoder.
+            let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
+            let o = radio_1200(samp_rate, &[]).await.expect("rustradio run failed");
+            scope
+                .post_message(&to_value(&WorkerToMain::Result(o)).expect("failed to serialize"))
+                .expect("failed to post message");
+        }
         MainToWorker::Data(id, data) => {
             trace!("Worker: Got data on {id:?} len {}", data.len());
             GRAPH_COMMS.with(|cell| {
@@ -39,8 +49,7 @@ async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> R
                 let comms = cell.get().unwrap().clone();
                 spawn_local(async move {
                     let comms = &mut RefCell::borrow_mut(&comms);
-                    comms
-                        .src
+                    comms.src[&id]
                         .send(wasm_source::Msg::Extend(data))
                         .expect("Worker failed to send data to the wasm source");
                     comms
@@ -61,7 +70,7 @@ async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> R
                     //let mut comms: &mut GraphComms = &mut RefCell::borrow_mut(&comms);
                     let comms = &mut RefCell::borrow_mut(&comms);
                     //let mut comms = comms.borrow_mut();
-                    comms.src.send(wasm_source::Msg::Eof).unwrap();
+                    comms.src[&id].send(wasm_source::Msg::Eof).unwrap();
                     comms.graph.send(()).await.unwrap();
                 });
             });
@@ -101,20 +110,14 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
     global.post_message(&to_value(&WorkerToMain::Ready)?)?;
     info!("Done setting up worker");
 
-    // Run the decoder.
-    let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
-    let o = radio_1200(&[]).await.expect("rustradio run failed");
-    scope
-        .post_message(&to_value(&WorkerToMain::Result(o)).expect("failed to serialize"))
-        .expect("failed to post message");
     Ok(())
 }
 
-async fn radio_1200(data: &[u8]) -> rustradio::Result<String> {
+async fn radio_1200(samp_rate: u64, data: &[u8]) -> rustradio::Result<String> {
     info!("AX.25 1200 decode of {} bytes", data.len());
 
     // Decoder parameters.
-    let samp_rate = 50_000.0;
+    let samp_rate = samp_rate as f32;
     let if_rate = 50_000.0;
     let baud = 1200.0;
     let freq1 = 1200.0;
@@ -187,7 +190,7 @@ async fn radio_1200(data: &[u8]) -> rustradio::Result<String> {
     GRAPH_COMMS.with(|cell| {
         cell.get_or_init(move || {
             Rc::new(RefCell::new(GraphComms {
-                src: src_tx,
+                src: [(crate::RECEIVER_SOURCE, src_tx)].into_iter().collect(),
                 graph: tx,
             }))
         });

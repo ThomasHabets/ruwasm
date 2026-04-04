@@ -8,19 +8,26 @@ mod wasm_graph;
 mod wasm_source;
 mod worker;
 
+const RECEIVER_SOURCE: ReceiverId = ReceiverId(0);
+
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = performance, js_name = now)]
     fn js_performance_now() -> f64;
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ReceiverId(u64);
 
 /// Messages going from main (UI) thread to worker.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 enum MainToWorker {
+    /// Start the graph.
+    Start{
+        samp_rate: u64,
+    },
+
     /// Data going to a WasmSource or something.
     Data(ReceiverId, Vec<u8>),
 

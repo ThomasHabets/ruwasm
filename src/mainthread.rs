@@ -13,12 +13,12 @@ use web_sys::{
     Element, Event, File, FileReader, HtmlInputElement, MessageEvent, ProgressEvent, Worker,
 };
 
+use crate::RECEIVER_SOURCE;
 use crate::ReceiverId;
 use crate::js_performance_now;
 use crate::uint8array_to_vec;
 use crate::{MainToWorker, WorkerToMain};
 
-const RECEIVER_SOURCE: ReceiverId = ReceiverId(0);
 const HTML_DISABLED: &str = "disabled";
 const ID_RESULT: &str = "result";
 const ID_FILE_INPUT: &str = "fileInput";
@@ -81,10 +81,25 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
         handler.forget();
     }
 
+    // Set up Start button.
+    {
+        let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
+            let samp_rate: u64 = get_element("input-samp-rate")?.dyn_into::<web_sys::HtmlInputElement>()?.value().parse().map_err(|e| JsValue::from_str(&format!("parsing sample rate: {e}")))?;
+            worker().post_message(&to_value(&MainToWorker::Start{samp_rate})?)?;
+            let input = get_element(ID_FILE_INPUT)?.dyn_into::<HtmlInputElement>()?;
+            input.set_disabled(false);
+            Ok(())
+        });
+        let btn = get_element("btn-start")?.dyn_into::<web_sys::HtmlButtonElement>()?;
+        btn.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())?;
+        btn.remove_attribute(HTML_DISABLED)?;
+        handler.forget();
+    }
+
     // Set up file input thing.
     {
         let input = get_element(ID_FILE_INPUT)?.dyn_into::<HtmlInputElement>()?;
-        input.set_disabled(false);
+        //input.set_disabled(false);
         // TODO: make some sort of UI friendly bounded channel. Don't want it to
         // block.
         info!("Main: installing file chunk handler");
