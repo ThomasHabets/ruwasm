@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use log::info;
-use serde_wasm_bindgen::{from_value, to_value};
+use serde_wasm_bindgen::from_value;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::js_sys::Uint8Array;
@@ -44,7 +44,7 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
         }
         WorkerToMain::Ping(t) => {
             worker()
-                .post_message(&to_value(&MainToWorker::Pong(t)).unwrap())
+                .post_message(&MainToWorker::Pong(t).try_into()?)
                 .unwrap();
         }
         WorkerToMain::Pong(from) => {
@@ -76,7 +76,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
     {
         let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
             info!("ping button clicked");
-            worker().post_message(&to_value(&MainToWorker::Ping(js_performance_now()))?)?;
+            worker().post_message(&MainToWorker::Ping(js_performance_now()).try_into()?)?;
             Ok(())
         });
         let btn = get_element(ID_PING)?.dyn_into::<web_sys::HtmlButtonElement>()?;
@@ -93,7 +93,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
                 .value()
                 .parse()
                 .map_err(|e| JsValue::from_str(&format!("parsing sample rate: {e}")))?;
-            worker().post_message(&to_value(&MainToWorker::Start { samp_rate })?)?;
+            worker().post_message(&MainToWorker::Start { samp_rate }.try_into()?)?;
             get_element(ID_FILE_INPUT)?
                 .dyn_into::<HtmlInputElement>()?
                 .set_disabled(false);
@@ -320,7 +320,7 @@ fn read_file_in_chunks(id: ReceiverId, file: File, chunk_size: u64) -> Result<()
 fn post_eof(id: ReceiverId) {
     info!("Main: Post EOF");
     worker()
-        .post_message(&to_value(&MainToWorker::Eof(id)).unwrap())
+        .post_message(&MainToWorker::Eof(id).try_into().unwrap())
         .unwrap();
 }
 
@@ -340,7 +340,6 @@ fn post_chunk_message(
         100 * start / file_size
     );
     worker()
-        .post_message(&to_value(&MainToWorker::Data(id, data)).unwrap())
+        .post_message(&MainToWorker::Data(id, data).try_into().unwrap())
         .unwrap();
-    //todo!()
 }

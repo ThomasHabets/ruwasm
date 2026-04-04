@@ -42,6 +42,13 @@ enum MainToWorker {
     Pong(f64),
 }
 
+impl TryInto<wasm_bindgen::JsValue> for MainToWorker {
+    type Error = wasm_bindgen::JsValue;
+    fn try_into(self) -> Result<wasm_bindgen::JsValue, Self::Error> {
+        Ok(serde_wasm_bindgen::to_value(&self)?)
+    }
+}
+
 /// Messages from the worker to the main (UI) thread.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
@@ -59,6 +66,13 @@ enum WorkerToMain {
 
     /// At the end of execution, provide the result as a string.
     Result(String),
+}
+
+impl TryInto<wasm_bindgen::JsValue> for WorkerToMain {
+    type Error = wasm_bindgen::JsValue;
+    fn try_into(self) -> Result<wasm_bindgen::JsValue, Self::Error> {
+        Ok(serde_wasm_bindgen::to_value(&self)?)
+    }
 }
 
 /// Entry point for both worker and main thread.

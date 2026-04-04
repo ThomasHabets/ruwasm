@@ -9,7 +9,7 @@ use rustradio::graph::{Graph, GraphRunner};
 
 use futures::SinkExt;
 use log::{info, trace};
-use serde_wasm_bindgen::{from_value, to_value};
+use serde_wasm_bindgen::from_value;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
@@ -41,7 +41,11 @@ async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> R
                 .await
                 .expect("rustradio run failed");
             scope
-                .post_message(&to_value(&WorkerToMain::Result(o)).expect("failed to serialize"))
+                .post_message(
+                    &WorkerToMain::Result(o)
+                        .try_into()
+                        .expect("failed to serialize"),
+                )
                 .expect("failed to post message");
         }
         MainToWorker::Data(id, data) => {
@@ -80,7 +84,7 @@ async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> R
         MainToWorker::Ping(t) => {
             info!("Worker: Got ping");
             scope
-                .post_message(&to_value(&WorkerToMain::Pong(t)).unwrap())
+                .post_message(&WorkerToMain::Pong(t).try_into().unwrap())
                 .expect("worker failed to send pong");
         }
         MainToWorker::Pong(from) => {
@@ -109,7 +113,7 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
 
     global.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
     onmessage.forget();
-    global.post_message(&to_value(&WorkerToMain::Ready)?)?;
+    global.post_message(&WorkerToMain::Ready.try_into()?)?;
     info!("Done setting up worker");
 
     Ok(())
