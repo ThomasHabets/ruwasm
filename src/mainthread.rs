@@ -24,6 +24,8 @@ const ID_RESULT: &str = "result";
 const ID_START: &str = "btn-start";
 const ID_SAMP_RATE: &str = "input-samp-rate";
 const ID_FILE_INPUT: &str = "fileInput";
+const ID_ADD: &str = "btn-add";
+const ID_PING: &str = "btn-ping";
 
 thread_local! {
     static WORKER: OnceCell<Worker> = const { OnceCell::new() };
@@ -64,7 +66,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
             info!("button clicked");
             set_content(ID_RESULT, &format!("Result of add: {}", crate::add(3, 5)))
         });
-        let btn = get_element("btn-add")?.dyn_into::<web_sys::HtmlButtonElement>()?;
+        let btn = get_element(ID_ADD)?.dyn_into::<web_sys::HtmlButtonElement>()?;
         btn.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())?;
         btn.remove_attribute(HTML_DISABLED)?;
         handler.forget();
@@ -77,7 +79,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
             worker().post_message(&to_value(&MainToWorker::Ping(js_performance_now()))?)?;
             Ok(())
         });
-        let btn = get_element("btn-ping")?.dyn_into::<web_sys::HtmlButtonElement>()?;
+        let btn = get_element(ID_PING)?.dyn_into::<web_sys::HtmlButtonElement>()?;
         btn.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())?;
         btn.remove_attribute(HTML_DISABLED)?;
         handler.forget();
