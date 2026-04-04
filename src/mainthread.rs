@@ -103,7 +103,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
                 .set_disabled(true);
             Ok(())
         });
-        let btn = get_element("btn-start")?.dyn_into::<web_sys::HtmlButtonElement>()?;
+        let btn = get_element(ID_START)?.dyn_into::<web_sys::HtmlButtonElement>()?;
         btn.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())?;
         btn.remove_attribute(HTML_DISABLED)?;
         handler.forget();
@@ -210,6 +210,9 @@ fn install_file_chunk_listener(
                 return Ok(());
             };
             info!("Read file now!");
+            get_element(ID_FILE_INPUT)?
+                .dyn_into::<web_sys::HtmlInputElement>()?
+                .set_disabled(true);
             set_content(ID_RESULT, "Running rustradio on input…")?;
             if let Err(err) = read_file_in_chunks(id, file, chunk_size) {
                 web_sys::console::error_1(&err);
