@@ -133,7 +133,6 @@ fn worker() -> Worker {
             opts.set_type(web_sys::WorkerType::Module);
             let worker = Worker::new_with_options("./worker.js", &opts).unwrap();
 
-            // TODO: magic value.
             let onmessage = Closure::<dyn FnMut(MessageEvent) -> Result<(), JsValue>>::new(
                 move |e: MessageEvent| {
                     spawn_local(async move {
