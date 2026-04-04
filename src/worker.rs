@@ -7,7 +7,7 @@ use rustradio::blocks::*;
 use rustradio::graph::{Graph, GraphRunner};
 
 use futures::SinkExt;
-use log::info;
+use log::{info, trace};
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
@@ -17,6 +17,7 @@ use futures_channel::mpsc;
 //use wasmer_types::lib::std::sync::mpsc;
 //use tokio::sync::mpsc;
 
+use crate::js_performance_now;
 use crate::wasm_source;
 use crate::{MainToWorker, WorkerToMain};
 
@@ -31,8 +32,8 @@ thread_local! {
 
 async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> Result<(), JsValue> {
     match from_value::<MainToWorker>(event.data()).expect("parsing MainToWorker message") {
-        MainToWorker::Data(data) => {
-            //info!("Worker: Got data len {}", data.len());
+        MainToWorker::Data(id, data) => {
+            trace!("Worker: Got data on {id:?} len {}", data.len());
             GRAPH_COMMS.with(|cell| {
                 let cell = cell.clone();
                 let comms = cell.get().unwrap().clone();
@@ -50,8 +51,9 @@ async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> R
                 });
             });
         }
-        MainToWorker::Eof => {
-            info!("Worker: Got EOF");
+        MainToWorker::Eof(id) => {
+            info!("Worker: Got EOF on {id:?}");
+            // TODO: use the ID.
             GRAPH_COMMS.with(|cell| {
                 let cell = cell.clone();
                 let comms = cell.get().unwrap().clone();
@@ -71,7 +73,7 @@ async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> R
                 .expect("worker failed to send pong");
         }
         MainToWorker::Pong(from) => {
-            let to = crate::now();
+            let to = js_performance_now();
             info!("Worker: Got Pong {from} -> {to}: {}", to - from);
         }
     }

@@ -10,23 +10,22 @@ mod worker;
 
 #[wasm_bindgen]
 extern "C" {
-    #[wasm_bindgen(js_namespace = performance)]
-    fn now() -> f64;
+    #[wasm_bindgen(js_namespace = performance, js_name = now)]
+    fn js_performance_now() -> f64;
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct ReceiverId(u64);
 
 /// Messages going from main (UI) thread to worker.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 enum MainToWorker {
-    /// Data going to a WasmSource.
-    ///
-    /// TODO: allow for multiple incoming streams, by identifying them somehow.
-    Data(Vec<u8>),
+    /// Data going to a WasmSource or something.
+    Data(ReceiverId, Vec<u8>),
 
     /// Inform that stream has ended.
-    ///
-    /// TODO: allow for multiple incoming streams, by identifying them somehow.
-    Eof,
+    Eof(ReceiverId),
 
     /// Send a ping with a `performance.now()` timestamp.
     /// The timestamp will be reflected in the Pong.
@@ -63,17 +62,16 @@ enum WorkerToMain {
 /// calls out to the respective special setups.
 #[wasm_bindgen(start)]
 pub async fn start() -> Result<(), JsValue> {
+    // Init logging.
     console_log::init_with_level(log::Level::Debug).expect("Failed to init logging");
-    info!("Logging initialized");
-
-    info!("ruwasm: Starting at time {}", now());
+    info!("Logging initialized (expect this message is once for UI thread and worker)");
     console_error_panic_hook::set_once();
 
     if web_sys::window().is_none() {
-        info!("Worker: setting up");
+        info!("Worker: Starting at time {}", js_performance_now());
         worker::setup().await
     } else {
-        info!("Main: setting up");
+        info!("Main: Starting at time {}", js_performance_now());
         mainthread::setup().await
     }
 }
