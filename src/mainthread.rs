@@ -131,7 +131,7 @@ fn worker() -> Worker {
             info!("Initializing the worker.2");
             let opts = web_sys::WorkerOptions::new();
             opts.set_type(web_sys::WorkerType::Module);
-            let worker = Worker::new_with_options("./worker.js", &opts).unwrap();
+            let worker = Worker::new_with_options("./wasm-mod.js", &opts).unwrap();
 
             let onmessage = Closure::<dyn FnMut(MessageEvent) -> Result<(), JsValue>>::new(
                 move |e: MessageEvent| {

@@ -62,24 +62,7 @@
 
     <h2>From wasm</h2>
     <pre id="result"></pre>
-    <!--
-    <h2>From wasm in worker mode</h2>
-    <div id="worker-output"></div>
-    -->
 
-    <!-- run synchronous -->
-    <script type="module">
-            import init, { git_version } from "./ruwasm.js";
-            await init();
-            console.log("JS: WASM initialized with WASM version ", git_version());
-            // TODO: check WASM version against HTML version. Should match.
-            if (false) {
-                    document.getElementById("result").innerHTML = (
-                        "WASM loaded."
-                        + "<br>WASM code version: " + git_version()
-                        + "<br>WASM built by Rust version: " + rustc_version()
-                    );
-            }
-    </script>
+    <script type="module" src="wasm-mod.js"></script>
 </body>
 </html>
