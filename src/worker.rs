@@ -9,7 +9,6 @@ use rustradio::graph::{Graph, GraphRunner};
 
 use futures::SinkExt;
 use log::{info, trace};
-use serde_wasm_bindgen::from_value;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
@@ -33,7 +32,7 @@ thread_local! {
 }
 
 async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> Result<(), JsValue> {
-    match from_value::<MainToWorker>(event.data()).expect("parsing MainToWorker message") {
+    match event.data().try_into()? {
         MainToWorker::Start { samp_rate } => {
             // Run the decoder.
             let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;

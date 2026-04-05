@@ -10,7 +10,7 @@ rm -rf "$OUTDIR"
 mkdir -p "$OUTDIR"
 
 wasm-pack build --target web -d "$OUTDIR/$PREFIX"
-cp "$WEBD/index.html" "$WEBD/worker.js" "$OUTDIR/$PREFIX/"
+cp "$WEBD/index.html" "$WEBD/wasm-mod.js" "$OUTDIR/$PREFIX/"
 
 # publish contents of ruwasm/ at site root
 shopt -s dotglob

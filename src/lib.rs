@@ -49,6 +49,13 @@ impl TryInto<wasm_bindgen::JsValue> for MainToWorker {
     }
 }
 
+impl TryFrom<wasm_bindgen::JsValue> for MainToWorker {
+    type Error = wasm_bindgen::JsValue;
+    fn try_from(js: wasm_bindgen::JsValue) -> Result<MainToWorker, Self::Error> {
+        Ok(serde_wasm_bindgen::from_value(js)?)
+    }
+}
+
 /// Messages from the worker to the main (UI) thread.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
@@ -72,6 +79,13 @@ impl TryInto<wasm_bindgen::JsValue> for WorkerToMain {
     type Error = wasm_bindgen::JsValue;
     fn try_into(self) -> Result<wasm_bindgen::JsValue, Self::Error> {
         Ok(serde_wasm_bindgen::to_value(&self)?)
+    }
+}
+
+impl TryFrom<wasm_bindgen::JsValue> for WorkerToMain {
+    type Error = wasm_bindgen::JsValue;
+    fn try_from(js: wasm_bindgen::JsValue) -> Result<WorkerToMain, Self::Error> {
+        Ok(serde_wasm_bindgen::from_value(js)?)
     }
 }
 
