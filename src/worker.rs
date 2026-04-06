@@ -6,16 +6,12 @@ use std::rc::Rc;
 use rustradio::blockchain;
 use rustradio::blocks::*;
 use rustradio::graph::{Graph, GraphRunner};
+use rustradio::stream::ReadStream;
 
-use futures::SinkExt;
 use log::{info, trace};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
-// use futures::channel::mpsc;
-use futures_channel::mpsc;
-//use wasmer_types::lib::std::sync::mpsc;
-//use tokio::sync::mpsc;
 
 use crate::ReceiverId;
 use crate::js_performance_now;
@@ -165,6 +161,11 @@ async fn radio_1200(samp_rate: u64, data: &[u8]) -> rustradio::Result<String> {
             .interp(if_rate as usize)
             .build(prev)
             .map_err(|e| rustradio::Error::wrap(e, "rational resampler"))?,
+    ];
+    let prev = add_complex_mag_tap(&mut g, "iq_mag", prev);
+    let prev = blockchain![
+        g,
+        prev,
         QuadratureDemod::new(prev, 1.0),
         Hilbert::new(prev, 65, &rustradio::window::WindowType::Hamming),
         QuadratureDemod::new(prev, 1.0),
@@ -208,11 +209,26 @@ async fn radio_1200(samp_rate: u64, data: &[u8]) -> rustradio::Result<String> {
     while let Some(p) = prev.pop() {
         outs.push(format!("Decoded {p:?}").to_string());
     }
-    Ok(if outs.is_empty() {
+    let result = if outs.is_empty() {
         "nothing decoded".to_string()
     } else {
         outs.join("\n")
-    })
+    };
+    Ok(result)
+}
+
+fn add_complex_mag_tap(
+    g: &mut crate::wasm_graph::WasmGraph,
+    name: impl Into<String>,
+    src: ReadStream<rustradio::Complex>,
+) -> ReadStream<rustradio::Complex> {
+    let (tee, src, tap_src) = Tee::new(src);
+    let (mag, tap_src) = ComplexToMag2::new(tap_src);
+    let sink = crate::float_sink::FloatSink::new(tap_src, name.into());
+    g.add(Box::new(tee));
+    g.add(Box::new(mag));
+    g.add(Box::new(sink));
+    src
 }
 
 // TODO: add support for 9600

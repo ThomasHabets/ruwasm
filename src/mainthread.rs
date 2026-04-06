@@ -4,7 +4,7 @@ use std::cell::OnceCell;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use log::info;
+use log::{debug, info};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::js_sys::Uint8Array;
@@ -12,6 +12,7 @@ use web_sys::{
     Element, Event, File, FileReader, HtmlInputElement, MessageEvent, ProgressEvent, Worker,
 };
 
+use crate::FloatStream;
 use crate::RECEIVER_SOURCE;
 use crate::ReceiverId;
 use crate::js_performance_now;
@@ -28,6 +29,24 @@ const ID_PING: &str = "btn-ping";
 
 thread_local! {
     static WORKER: OnceCell<Worker> = const { OnceCell::new() };
+    static LATEST_FLOAT_STREAMS: RefCell<Vec<FloatStream>> = const { RefCell::new(Vec::new()) };
+}
+
+fn latest_float_streams() -> Vec<FloatStream> {
+    LATEST_FLOAT_STREAMS.with(|cell| cell.borrow().clone())
+}
+
+fn update_latest_float_streams(streams: Vec<FloatStream>) {
+    LATEST_FLOAT_STREAMS.with(|cell| {
+        let current = &mut *cell.borrow_mut();
+        for stream in streams {
+            if let Some(existing) = current.iter_mut().find(|s| s.name == stream.name) {
+                *existing = stream;
+            } else {
+                current.push(stream);
+            }
+        }
+    });
 }
 
 /// Handle message sent from the worker.
@@ -40,6 +59,13 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
         WorkerToMain::Result(s) => {
             set_content(ID_RESULT, &s)?;
             info!("Main: worker returned: {s}");
+        }
+        WorkerToMain::FloatStreams(streams) => {
+            info!("Main: received {} float stream(s)", streams.len());
+            for (n, s) in streams.iter().enumerate() {
+                debug!("Stream {n} name {}", s.name);
+            }
+            update_latest_float_streams(streams);
         }
         WorkerToMain::Ping(t) => {
             worker()

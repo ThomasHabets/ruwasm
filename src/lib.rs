@@ -1,8 +1,10 @@
 use log::info;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 use web_sys::js_sys::Uint8Array;
 
+mod float_sink;
 mod mainthread;
 mod wasm_graph;
 mod wasm_source;
@@ -18,6 +20,13 @@ extern "C" {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ReceiverId(u64);
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, PartialOrd)]
+pub struct FloatStream {
+    pub name: String,
+    pub tags: Vec<rustradio::stream::Tag>,
+    pub samples: Vec<rustradio::Float>,
+}
 
 /// Messages going from main (UI) thread to worker.
 #[derive(Debug, Serialize, Deserialize)]
@@ -73,6 +82,9 @@ enum WorkerToMain {
 
     /// At the end of execution, provide the result as a string.
     Result(String),
+
+    /// Float streams captured in the worker graph.
+    FloatStreams(Vec<FloatStream>),
 }
 
 impl TryInto<wasm_bindgen::JsValue> for WorkerToMain {
