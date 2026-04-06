@@ -43,6 +43,7 @@ features = [
     "CanvasRenderingContext2d",
     "HtmlCanvasElement",
     "MediaQueryList",
+    "DomStringMap",
 ]
 [lib]
 crate-type = ["cdylib"]  # <-- THIS IS CRITICAL

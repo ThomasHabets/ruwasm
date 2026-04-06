@@ -26,6 +26,7 @@ const ID_SAMP_RATE: &str = "input-samp-rate";
 const ID_FILE_INPUT: &str = "fileInput";
 const ID_ADD: &str = "btn-add";
 const ID_PING: &str = "btn-ping";
+const ID_HTML: &str = "root-html";
 
 thread_local! {
     static WORKER: OnceCell<Worker> = const { OnceCell::new() };
@@ -185,6 +186,23 @@ fn set_content(id: &str, content: &str) -> Result<(), JsValue> {
 }
 
 pub(crate) async fn setup() -> Result<(), JsValue> {
+    {
+        let wgit = crate::git_version();
+        let html_git_version = get_element(ID_HTML)?
+            .dyn_into::<web_sys::HtmlElement>()?
+            .dataset()
+            .get("gitVersion")
+            .ok_or(JsValue::from_str("No HTML git version set"))?;
+        if html_git_version == wgit {
+            log::info!("Git versions matched");
+        } else {
+            let err_str =
+                format!("Git version mismatch. HTML is {html_git_version}, Wasm is {wgit}. You may need to clear your caches.");
+            set_content(ID_RESULT, &err_str)?;
+            return Err(JsValue::from_str(&err_str));
+        }
+    }
+
     // Init the worker.
     worker();
 
