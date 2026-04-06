@@ -10,8 +10,8 @@ console_log = "1.0.0"
 futures = "0.3.32"
 futures-channel = "0.3.32"
 log = "0.4.29"
-rustradio = { version = "0.16.2", features = ["wasm"] }
-rustradio_macros = "0.16.2"
+rustradio = { version = "0.16.3", features = ["wasm"] }
+rustradio_macros = "0.16.3"
 #rustradio = { path = "../rustradio", features = ["wasm"] }
 #rustradio = { git = "https://github.com/ThomasHabets/rustradio", branch = "wasm", features = ["wasm"] }
 serde = { version = "1.0.219", features = ["derive"] }

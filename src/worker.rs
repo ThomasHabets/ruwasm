@@ -32,9 +32,7 @@ async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> R
         MainToWorker::Start { samp_rate } => {
             // Run the decoder.
             let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
-            let o = radio_1200(samp_rate, &[])
-                .await
-                .expect("rustradio run failed");
+            let o = radio_1200(samp_rate, &[]).await?;
             scope
                 .post_message(
                     &WorkerToMain::Result(o)
