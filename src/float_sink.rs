@@ -1,7 +1,7 @@
-/// TODO: send what we're holding on eof.
-use rustradio::Float;
 use rustradio::block::{Block, BlockRet};
 use rustradio::stream::{ReadStream, Tag};
+/// TODO: send what we're holding on eof.
+use rustradio::{Error, Float};
 use wasm_bindgen::JsCast;
 
 use crate::{FloatStream, WorkerToMain};
@@ -22,7 +22,7 @@ impl FloatSink {
     fn post_snapshot(&self) -> rustradio::Result<()> {
         let scope = web_sys::js_sys::global()
             .dyn_into::<web_sys::DedicatedWorkerGlobalScope>()
-            .map_err(|_| rustradio::Error::msg("not in worker scope"))?;
+            .map_err(|e| Error::msg(format!("not in worker scope: {e:?}")))?;
         scope
             .post_message(
                 &WorkerToMain::FloatStreams(vec![FloatStream {
@@ -31,9 +31,9 @@ impl FloatSink {
                     samples: self.samples.clone(),
                 }])
                 .try_into()
-                .map_err(|_| rustradio::Error::msg("serialize float streams"))?,
+                .map_err(|e| Error::msg(format!("serialize float streams: {e:?}")))?,
             )
-            .map_err(|_| rustradio::Error::msg("post float streams"))?;
+            .map_err(|e| Error::msg(format!("post float streams: {e:?}")))?;
         Ok(())
     }
 }

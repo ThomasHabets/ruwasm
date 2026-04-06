@@ -195,8 +195,9 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
         if html_git_version == wgit {
             log::info!("Git versions matched");
         } else {
-            let err_str =
-                format!("Git version mismatch. HTML is {html_git_version}, Wasm is {wgit}. You may need to clear your caches.");
+            let err_str = format!(
+                "Git version mismatch. HTML is {html_git_version}, Wasm is {wgit}. You may need to clear your caches."
+            );
             set_content(ID_RESULT, &err_str)?;
             return Err(JsValue::from_str(&err_str));
         }
