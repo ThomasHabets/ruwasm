@@ -138,7 +138,6 @@ fn worker() -> Worker {
     WORKER.with(|cell| {
         info!("Initializing the worker");
         cell.get_or_init(|| {
-            info!("Initializing the worker.2");
             let opts = web_sys::WorkerOptions::new();
             opts.set_type(web_sys::WorkerType::Module);
             let worker = Worker::new_with_options("./wasm-mod.js", &opts).unwrap();
