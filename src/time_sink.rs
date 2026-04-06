@@ -3,7 +3,6 @@
 /// It works as far as getting something on the screen, but requires more work.
 ///
 /// Things that need fixing:
-/// * Y axis labels.
 /// * Toggle for auto scaling, not button.
 /// * The whole thing should get the complete new set of points, not append and
 ///   trim.
@@ -28,6 +27,11 @@ const ID_GRAPH_Y_ZOOM_OUT: &str = "graph-y-zoom-out";
 const ID_GRAPH_Y_AUTO: &str = "graph-y-auto";
 
 const MAX_GRAPH_POINTS: usize = 500_000;
+const AXIS_MARGIN_LEFT: f64 = 56.0;
+const AXIS_MARGIN_RIGHT: f64 = 12.0;
+const AXIS_MARGIN_TOP: f64 = 12.0;
+const AXIS_MARGIN_BOTTOM: f64 = 30.0;
+const AXIS_TICK_COUNT: usize = 6;
 
 thread_local! {
     static GRAPH_STATE: RefCell<Option<GraphState>> = const { RefCell::new(None) };
@@ -299,6 +303,25 @@ fn draw_graph() -> Result<(), JsValue> {
             return Ok(());
         };
 
+        let plot_left = AXIS_MARGIN_LEFT.min((width - 1.0).max(0.0));
+        let plot_top = AXIS_MARGIN_TOP.min((height - 1.0).max(0.0));
+        let plot_width = (width - AXIS_MARGIN_LEFT - AXIS_MARGIN_RIGHT).max(1.0);
+        let plot_height = (height - AXIS_MARGIN_TOP - AXIS_MARGIN_BOTTOM).max(1.0);
+
+        draw_axes(
+            &ctx,
+            axis,
+            text,
+            plot_left,
+            plot_top,
+            plot_width,
+            plot_height,
+            x_min,
+            x_max,
+            y_min as f64,
+            y_max as f64,
+        )?;
+
         let x_range = (x_max - x_min).max(1e-9);
         let y_range = (y_max - y_min) as f64;
         let colors = ["#2b8cbe", "#31a354", "#756bb1", "#e6550d"];
@@ -308,7 +331,7 @@ fn draw_graph() -> Result<(), JsValue> {
                 continue;
             }
             let len = series.samples.len();
-            let mut step = (len as f64 / width.max(1.0)).ceil() as usize;
+            let mut step = (len as f64 / plot_width.max(1.0)).ceil() as usize;
             if step < 1 {
                 step = 1;
             }
@@ -319,8 +342,9 @@ fn draw_graph() -> Result<(), JsValue> {
             for (i, sample) in series.samples.iter().enumerate().step_by(step) {
                 let sample_idx = series.start_index + i as u64;
                 let t = sample_idx as f64 / state.sample_rate;
-                let x = ((t - x_min) / x_range) * width;
-                let y = height - ((*sample as f64 - y_min as f64) / y_range) * height;
+                let x = plot_left + ((t - x_min) / x_range) * plot_width;
+                let y = plot_top + plot_height
+                    - ((*sample as f64 - y_min as f64) / y_range) * plot_height;
                 if !started {
                     ctx.move_to(x, y);
                     started = true;
@@ -334,6 +358,128 @@ fn draw_graph() -> Result<(), JsValue> {
     })?;
 
     Ok(())
+}
+
+fn draw_axes(
+    ctx: &CanvasRenderingContext2d,
+    axis: &str,
+    text: &str,
+    plot_left: f64,
+    plot_top: f64,
+    plot_width: f64,
+    plot_height: f64,
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+) -> Result<(), JsValue> {
+    let plot_right = plot_left + plot_width;
+    let plot_bottom = plot_top + plot_height;
+
+    ctx.set_stroke_style(&JsValue::from_str(axis));
+    ctx.set_line_width(1.0);
+    ctx.begin_path();
+    ctx.move_to(plot_left, plot_top);
+    ctx.line_to(plot_left, plot_bottom);
+    ctx.line_to(plot_right, plot_bottom);
+    ctx.stroke();
+
+    ctx.set_fill_style(&JsValue::from_str(text));
+    ctx.set_font("12px sans-serif");
+
+    let x_ticks = nice_ticks(x_min, x_max, AXIS_TICK_COUNT);
+    ctx.set_text_align("center");
+    ctx.set_text_baseline("top");
+    for tick in &x_ticks {
+        let t = (*tick - x_min) / (x_max - x_min).max(1e-9);
+        let x = plot_left + t * plot_width;
+        ctx.begin_path();
+        ctx.move_to(x, plot_bottom);
+        ctx.line_to(x, plot_bottom + 4.0);
+        ctx.stroke();
+        ctx.fill_text(&format_tick(*tick), x, plot_bottom + 6.0)?;
+    }
+
+    let y_ticks = nice_ticks(y_min, y_max, AXIS_TICK_COUNT);
+    ctx.set_text_align("right");
+    ctx.set_text_baseline("middle");
+    for tick in &y_ticks {
+        let t = (*tick - y_min) / (y_max - y_min).max(1e-9);
+        let y = plot_bottom - t * plot_height;
+        ctx.begin_path();
+        ctx.move_to(plot_left - 4.0, y);
+        ctx.line_to(plot_left, y);
+        ctx.stroke();
+        ctx.fill_text(&format_tick(*tick), plot_left - 6.0, y)?;
+    }
+
+    ctx.set_text_align("center");
+    ctx.set_text_baseline("top");
+    ctx.fill_text("Time (s)", plot_left + plot_width / 2.0, plot_bottom + 20.0)?;
+
+    ctx.save();
+    ctx.translate(plot_left - 40.0, plot_top + plot_height / 2.0)?;
+    ctx.rotate(-std::f64::consts::FRAC_PI_2)?;
+    ctx.set_text_align("center");
+    ctx.set_text_baseline("top");
+    ctx.fill_text("Amplitude", 0.0, 0.0)?;
+    ctx.restore();
+
+    Ok(())
+}
+
+fn nice_ticks(min: f64, max: f64, count: usize) -> Vec<f64> {
+    if !min.is_finite() || !max.is_finite() || count < 2 {
+        return Vec::new();
+    }
+    if (max - min).abs() < f64::EPSILON {
+        return vec![min];
+    }
+    let range = max - min;
+    let step = nice_step(range / (count as f64 - 1.0));
+    let start = (min / step).floor() * step;
+    let end = (max / step).ceil() * step;
+    let mut ticks = Vec::new();
+    let mut v = start;
+    while v <= end + step * 0.5 {
+        ticks.push(v);
+        v += step;
+    }
+    ticks
+}
+
+fn nice_step(raw_step: f64) -> f64 {
+    if raw_step <= 0.0 {
+        return 1.0;
+    }
+    let exp = raw_step.log10().floor();
+    let base = 10.0_f64.powf(exp);
+    let scaled = raw_step / base;
+    let nice_scaled = if scaled <= 1.0 {
+        1.0
+    } else if scaled <= 2.0 {
+        2.0
+    } else if scaled <= 5.0 {
+        5.0
+    } else {
+        10.0
+    };
+    nice_scaled * base
+}
+
+fn format_tick(value: f64) -> String {
+    let abs = value.abs();
+    if abs >= 1000.0 {
+        format!("{value:.0}")
+    } else if abs >= 100.0 {
+        format!("{value:.1}")
+    } else if abs >= 10.0 {
+        format!("{value:.2}")
+    } else if abs >= 1.0 {
+        format!("{value:.3}")
+    } else {
+        format!("{value:.4}")
+    }
 }
 
 fn zoom_y(factor: f32) -> Result<(), JsValue> {
