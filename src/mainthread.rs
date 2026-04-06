@@ -32,23 +32,6 @@ thread_local! {
     static LATEST_FLOAT_STREAMS: RefCell<Vec<FloatStream>> = const { RefCell::new(Vec::new()) };
 }
 
-fn latest_float_streams() -> Vec<FloatStream> {
-    LATEST_FLOAT_STREAMS.with(|cell| cell.borrow().clone())
-}
-
-fn update_latest_float_streams(streams: Vec<FloatStream>) {
-    LATEST_FLOAT_STREAMS.with(|cell| {
-        let current = &mut *cell.borrow_mut();
-        for stream in streams {
-            if let Some(existing) = current.iter_mut().find(|s| s.name == stream.name) {
-                *existing = stream;
-            } else {
-                current.push(stream);
-            }
-        }
-    });
-}
-
 /// Handle message sent from the worker.
 async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
     match e.data().try_into()? {
@@ -65,7 +48,7 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
             for (n, s) in streams.iter().enumerate() {
                 debug!("Stream {n} name {}", s.name);
             }
-            update_latest_float_streams(streams);
+            crate::time_sink::update(streams)?;
         }
         WorkerToMain::Ping(t) => {
             worker()
@@ -118,6 +101,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
                 .value()
                 .parse()
                 .map_err(|e| JsValue::from_str(&format!("parsing sample rate: {e}")))?;
+            crate::time_sink::set_sample_rate(samp_rate as f64);
             worker().post_message(&MainToWorker::Start { samp_rate }.try_into()?)?;
             get_element(ID_FILE_INPUT)?
                 .dyn_into::<HtmlInputElement>()?
@@ -180,7 +164,7 @@ fn worker() -> Worker {
 }
 
 /// Get HTML element by ID.
-fn get_element(id: &str) -> Result<Element, JsValue> {
+pub(crate) fn get_element(id: &str) -> Result<Element, JsValue> {
     let window = web_sys::window().ok_or(JsValue::from_str("no window"))?;
     let document = window
         .document()
@@ -215,6 +199,8 @@ WASM built by Rust version: {}"#,
             crate::rustc_version()
         ),
     )?;
+
+    crate::time_sink::setup_graph_ui()?;
 
     Ok(())
 }

@@ -1,3 +1,4 @@
+/// TODO: send what we're holding on eof.
 use rustradio::Float;
 use rustradio::block::{Block, BlockRet};
 use rustradio::stream::{ReadStream, Tag};

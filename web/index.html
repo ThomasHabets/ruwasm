@@ -21,6 +21,25 @@
   #form-rr {
           display: inline-grid;
   }
+  #graph-controls {
+          display: grid;
+          grid-template-columns: auto auto auto auto auto auto;
+          gap: 0.5em 0.75em;
+          align-items: center;
+  }
+  #float-graph {
+          width: 100%;
+          max-width: 960px;
+          height: 260px;
+          border: 1px solid #888;
+          background: #f9f9f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    #float-graph {
+      border-color: #555;
+      background: #111;
+    }
+  }
 </style>
 </head>
 <body>
@@ -58,6 +77,21 @@
     <input id="input-samp-rate" value="50000" /><br/>
     <button id="btn-start" disabled>Start RustRadio graph</button><br/>
     <input type="file" id="fileInput" disabled />
+    </div>
+
+    <h3>Signal strength</h3>
+    <div id="graph-controls" class="left-pad">
+      <label for="graph-y-min">Y min</label>
+      <input id="graph-y-min" value="-1" />
+      <label for="graph-y-max">Y max</label>
+      <input id="graph-y-max" value="1" />
+      <button id="graph-y-apply">Apply</button>
+      <button id="graph-y-zoom-in">Zoom In</button>
+      <button id="graph-y-zoom-out">Zoom Out</button>
+      <button id="graph-y-auto">Auto Scale</button>
+    </div>
+    <div class="left-pad">
+      <canvas id="float-graph"></canvas>
     </div>
 
     <h2>From wasm</h2>

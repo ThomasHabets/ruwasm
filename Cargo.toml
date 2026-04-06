@@ -40,6 +40,9 @@ features = [
     "MessageEvent",
     "ProgressEvent",
     "console",
+    "CanvasRenderingContext2d",
+    "HtmlCanvasElement",
+    "MediaQueryList",
 ]
 [lib]
 crate-type = ["cdylib"]  # <-- THIS IS CRITICAL
