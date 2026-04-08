@@ -1,6 +1,5 @@
 use log::info;
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 use web_sys::js_sys::Uint8Array;
 

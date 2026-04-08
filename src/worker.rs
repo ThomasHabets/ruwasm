@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use rustradio::blockchain;
 use rustradio::blocks::*;
-use rustradio::graph::{Graph, GraphRunner};
+use rustradio::graph::GraphRunner;
 use rustradio::stream::ReadStream;
 
 use log::{info, trace};
@@ -34,7 +34,7 @@ async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
         MainToWorker::Start { samp_rate } => {
             // Run the decoder.
             let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
-            let o = radio_1200(samp_rate, &[]).await?;
+            let o = radio_1200(samp_rate).await?;
             scope
                 .post_message(
                     &WorkerToMain::Result(o)
@@ -112,8 +112,12 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
     Ok(())
 }
 
-async fn radio_1200(samp_rate: u64, data: &[u8]) -> rustradio::Result<String> {
-    info!("AX.25 1200 decode of {} bytes", data.len());
+/// Run 1200bps AX.25 decoder.
+///
+/// The input comes in via GraphComms into the WasmSource block, so this
+/// function doesn't return until an EOF has come in.
+async fn radio_1200(samp_rate: u64) -> rustradio::Result<String> {
+    info!("AX.25 1200 decode of");
 
     // Decoder parameters.
     let samp_rate = samp_rate as f32;
@@ -126,18 +130,9 @@ async fn radio_1200(samp_rate: u64, data: &[u8]) -> rustradio::Result<String> {
     let symbol_taps = vec![1.0];
     let max_deviation = 0.1;
 
-    // Set up source part.
+    // Set up source block.
     let mut g = crate::wasm_graph::WasmGraph::new();
-    //let src = VectorSource::new(data.to_vec());
     let (src, prev, src_tx) = crate::wasm_source::WasmSource::new();
-    /*
-    src_tx
-        .send(crate::wasm_source::Msg::Eof)
-        .map_err(|_| rustradio::Error::msg("src_tx send eof"))?;
-        */
-    src_tx
-        .send(crate::wasm_source::Msg::Extend(data.to_vec()))
-        .map_err(|_| rustradio::Error::msg("src_tx send extend"))?;
     g.add(Box::new(src));
 
     // Set up rest of decoder graph.
@@ -189,7 +184,6 @@ async fn radio_1200(samp_rate: u64, data: &[u8]) -> rustradio::Result<String> {
         HdlcDeframer::new(prev, 10, 1500),
     ];
 
-    // TODO: magic value.
     let (tx, rx) = async_channel::unbounded();
     GRAPH_COMMS.with(|cell| {
         cell.get_or_init(move || {
@@ -215,6 +209,7 @@ async fn radio_1200(samp_rate: u64, data: &[u8]) -> rustradio::Result<String> {
     Ok(result)
 }
 
+/// Helper function to tee off into a FloatSink (to a graph).
 fn add_complex_mag_tap(
     g: &mut crate::wasm_graph::WasmGraph,
     name: impl Into<String>,
@@ -231,19 +226,23 @@ fn add_complex_mag_tap(
 
 // TODO: add support for 9600
 #[allow(unused)]
-fn radio_wrap_9600(data: &[u8]) -> rustradio::Result<String> {
-    info!("AX.25 9600 decode of {} bytes", data.len());
+async fn radio_wrap_9600() -> rustradio::Result<String> {
+    info!("AX.25 9600 decode");
     let samp_rate = 50_000.0;
     let if_rate = 50_000.0;
     let baud = 9600.0;
     //let symbol_taps = vec![0.0001, 0.9999];
     let symbol_taps = vec![1.0];
     let max_deviation = 0.1;
-    let mut g = Graph::new();
+
+    // Set up source block.
+    let mut g = crate::wasm_graph::WasmGraph::new();
+    let (src, prev, src_tx) = crate::wasm_source::WasmSource::new();
+    g.add(Box::new(src));
+
     let prev = blockchain![
         g,
         prev,
-        VectorSource::new(data.to_vec()),
         Parse::new(prev),
         FftFilter::new(
             prev,

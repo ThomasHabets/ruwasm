@@ -9,7 +9,7 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 
-use log::{debug, info};
+use log::info;
 use wasm_bindgen::prelude::*;
 use web_sys::{
     CanvasRenderingContext2d, Event, HtmlButtonElement, HtmlCanvasElement, HtmlInputElement,
