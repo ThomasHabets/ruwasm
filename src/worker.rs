@@ -27,7 +27,9 @@ thread_local! {
     static GRAPH_COMMS: OnceCell<Rc<RefCell<GraphComms>>> = const { OnceCell::new() };
 }
 
-async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> Result<(), JsValue> {
+/// Handle message sent from Main thread to worker.
+async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
+    let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
     match event.data().try_into()? {
         MainToWorker::Start { samp_rate } => {
             // Run the decoder.
@@ -88,22 +90,20 @@ async fn worker_msg(scope: DedicatedWorkerGlobalScope, event: MessageEvent) -> R
     Ok(())
 }
 
+/// Main entry point into the worker.
 pub(crate) async fn setup() -> Result<(), JsValue> {
     info!("Setting up worker");
 
-    let global = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
-
-    let worker = global.clone();
     let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
-        let worker = worker.clone();
         spawn_local(async move {
-            if let Err(e) = worker_msg(worker, event).await {
+            if let Err(e) = worker_msg(event).await {
                 // TODO: send error.
                 info!("Worker message handler failed: {e:?}");
             }
         });
     });
 
+    let global = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
     global.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
     onmessage.forget();
     global.post_message(&WorkerToMain::Ready.try_into()?)?;
