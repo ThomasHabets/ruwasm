@@ -1,8 +1,9 @@
-use std::sync::mpsc;
-
 use rustradio::Result;
 use rustradio::block::{Block, BlockRet};
 use rustradio::stream::{ReadStream, WriteStream, new_stream};
+
+// TODO: magic value.
+const PRODUCE_CHANNEL_SIZE: usize = 10;
 
 pub enum Msg {
     Eof,
@@ -13,14 +14,14 @@ pub enum Msg {
 pub struct WasmSource {
     buf: Vec<u8>,
     eof: bool,
-    rx: mpsc::Receiver<Msg>,
+    rx: async_channel::Receiver<Msg>,
     #[rustradio(out)]
     dst: WriteStream<u8>,
 }
 
 impl WasmSource {
-    pub fn new() -> (Self, ReadStream<u8>, mpsc::Sender<Msg>) {
-        let (tx, rx) = mpsc::channel();
+    pub fn new() -> (Self, ReadStream<u8>, async_channel::Sender<Msg>) {
+        let (tx, rx) = async_channel::bounded(PRODUCE_CHANNEL_SIZE);
         let (dst, src) = new_stream();
         (
             Self {
@@ -42,8 +43,8 @@ impl WasmSource {
     fn check_msgs(&mut self) {
         loop {
             match self.rx.try_recv() {
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => break,
+                Err(async_channel::TryRecvError::Empty) => break,
+                Err(async_channel::TryRecvError::Closed) => break,
                 Ok(Msg::Eof) => self.set_eof(),
                 Ok(Msg::Extend(v)) => self.extend(&v),
             }

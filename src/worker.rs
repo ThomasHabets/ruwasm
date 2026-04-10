@@ -18,12 +18,20 @@ use crate::js_performance_now;
 use crate::wasm_source;
 use crate::{MainToWorker, WorkerToMain};
 
+// TODO: magic values.
+const SOURCE_CHANNEL_SIZE: usize = 10;
+
 struct GraphComms {
-    src: HashMap<ReceiverId, std::sync::mpsc::Sender<crate::wasm_source::Msg>>,
+    src: HashMap<ReceiverId, async_channel::Sender<crate::wasm_source::Msg>>,
     graph: async_channel::Sender<()>,
 }
 
 thread_local! {
+    // TODO: switch to async_std::Mutex? But on top of that, there's no
+    // guarantee they wake up in order, right? So RefCell for the buffer, then
+    // async mutex for sending the messages?
+    //
+    // Maybe use futures_intrusive::LocalMutex with `is_fair`, which does guarantee FIFO?
     static GRAPH_COMMS: OnceCell<Rc<RefCell<GraphComms>>> = const { OnceCell::new() };
 }
 
@@ -52,6 +60,7 @@ async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
                     let comms = &mut RefCell::borrow_mut(&comms);
                     comms.src[&id]
                         .send(wasm_source::Msg::Extend(data))
+                        .await
                         .expect("Worker failed to send data to the wasm source");
                     comms
                         .graph
@@ -71,7 +80,7 @@ async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
                     //let mut comms: &mut GraphComms = &mut RefCell::borrow_mut(&comms);
                     let comms = &mut RefCell::borrow_mut(&comms);
                     //let mut comms = comms.borrow_mut();
-                    comms.src[&id].send(wasm_source::Msg::Eof).unwrap();
+                    comms.src[&id].send(wasm_source::Msg::Eof).await.unwrap();
                     comms.graph.send(()).await.unwrap();
                 });
             });
@@ -184,7 +193,7 @@ async fn radio_1200(samp_rate: u64) -> rustradio::Result<String> {
         HdlcDeframer::new(prev, 10, 1500),
     ];
 
-    let (tx, rx) = async_channel::unbounded();
+    let (tx, rx) = async_channel::bounded(SOURCE_CHANNEL_SIZE);
     GRAPH_COMMS.with(|cell| {
         cell.get_or_init(move || {
             Rc::new(RefCell::new(GraphComms {
