@@ -70,6 +70,13 @@ impl Block for WasmSource {
             let n = self.buf.len().min(o.len());
             o.slice()[..n].copy_from_slice(&self.buf[..n]);
             o.produce(n, &[]);
+
+            if self.buf.len() > 100_000 {
+                // This sometimes crashes and logs
+                // Draining 0..65536 of 1016276902
+                // wasm-bindgen: imported JS function that was not marked as `catch` threw an error: memory access out of bounds
+                log::debug!("WEIRD: Draining 0..{n} of {}", self.buf.len());
+            }
             self.buf.drain(0..n);
         }
     }

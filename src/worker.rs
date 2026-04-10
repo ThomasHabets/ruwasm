@@ -127,7 +127,7 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
 /// The input comes in via GraphComms into the WasmSource block, so this
 /// function doesn't return until an EOF has come in.
 async fn radio_1200(samp_rate: u64) -> rustradio::Result<String> {
-    info!("AX.25 1200 decode of");
+    info!("AX.25 1200 decoder running");
 
     // Decoder parameters.
     let samp_rate = samp_rate as f32;
