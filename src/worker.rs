@@ -27,12 +27,7 @@ struct GraphComms {
 }
 
 thread_local! {
-    // TODO: switch to async_std::Mutex? But on top of that, there's no
-    // guarantee they wake up in order, right? So RefCell for the buffer, then
-    // async mutex for sending the messages?
-    //
-    // Maybe use futures_intrusive::LocalMutex with `is_fair`, which does guarantee FIFO?
-    static GRAPH_COMMS: OnceCell<Rc<RefCell<GraphComms>>> = const { OnceCell::new() };
+    static GRAPH_COMMS: OnceCell<Rc<futures_intrusive::sync::LocalMutex<GraphComms>>> = const { OnceCell::new() };
 }
 
 /// Handle message sent from Main thread to worker.
@@ -57,7 +52,7 @@ async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
                 let cell = cell.clone();
                 let comms = cell.get().unwrap().clone();
                 spawn_local(async move {
-                    let comms = &mut RefCell::borrow_mut(&comms);
+                    let comms = comms.lock().await;
                     comms.src[&id]
                         .send(wasm_source::Msg::Extend(data))
                         .await
@@ -78,7 +73,7 @@ async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
                 let comms = cell.get().unwrap().clone();
                 spawn_local(async move {
                     //let mut comms: &mut GraphComms = &mut RefCell::borrow_mut(&comms);
-                    let comms = &mut RefCell::borrow_mut(&comms);
+                    let comms = comms.lock().await;
                     //let mut comms = comms.borrow_mut();
                     comms.src[&id].send(wasm_source::Msg::Eof).await.unwrap();
                     comms.graph.send(()).await.unwrap();
@@ -104,6 +99,12 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
     info!("Setting up worker");
 
     let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
+        // TODO: is `spawn_local` guaranteed to enqueue these messages in order?
+        // If not, then data may arrive out of order.
+        //
+        // If that's the case, then we're going to have to queue up the data
+        // syncly somehow. Maybe by adding a hop through an mpsc. That or remove
+        // a level of indirection. :-)
         spawn_local(async move {
             if let Err(e) = worker_msg(event).await {
                 // TODO: send error.
@@ -196,10 +197,15 @@ async fn radio_1200(samp_rate: u64) -> rustradio::Result<String> {
     let (tx, rx) = async_channel::bounded(SOURCE_CHANNEL_SIZE);
     GRAPH_COMMS.with(|cell| {
         cell.get_or_init(move || {
-            Rc::new(RefCell::new(GraphComms {
-                src: [(crate::RECEIVER_SOURCE, src_tx)].into_iter().collect(),
-                graph: tx,
-            }))
+            // Need `is_fair` to be set, because data packets need to come in
+            // order.
+            Rc::new(futures_intrusive::sync::LocalMutex::new(
+                GraphComms {
+                    src: [(crate::RECEIVER_SOURCE, src_tx)].into_iter().collect(),
+                    graph: tx,
+                },
+                true,
+            ))
         });
     });
     info!("Running graph");
