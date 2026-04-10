@@ -136,8 +136,8 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
 /// Give us the worker.
 fn worker() -> Worker {
     WORKER.with(|cell| {
-        info!("Initializing the worker");
         cell.get_or_init(|| {
+            info!("Main: Starting the worker");
             let opts = web_sys::WorkerOptions::new();
             opts.set_type(web_sys::WorkerType::Module);
             let worker = Worker::new_with_options("./wasm-mod.js", &opts).unwrap();
