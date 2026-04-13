@@ -263,9 +263,9 @@ fn draw_graph() -> Result<(), JsValue> {
     let axis = if is_dark { "#666" } else { "#888" };
     let text = if is_dark { "#ddd" } else { "#222" };
 
-    ctx.set_fill_style(&JsValue::from_str(bg));
+    ctx.set_fill_style_str(bg);
     ctx.fill_rect(0.0, 0.0, width, height);
-    ctx.set_stroke_style(&JsValue::from_str(axis));
+    ctx.set_stroke_style_str(axis);
     ctx.stroke_rect(0.5, 0.5, (width - 1.0).max(0.0), (height - 1.0).max(0.0));
 
     GRAPH_STATE.with(|cell| -> Result<(), JsValue> {
@@ -297,7 +297,7 @@ fn draw_graph() -> Result<(), JsValue> {
         }
 
         let Some((x_min, x_max)) = time_range(state) else {
-            ctx.set_fill_style(&JsValue::from_str(text));
+            ctx.set_fill_style_str(text);
             ctx.set_font("12px sans-serif");
             ctx.fill_text("Waiting for float data...", 12.0, 20.0)?;
             return Ok(());
@@ -335,7 +335,7 @@ fn draw_graph() -> Result<(), JsValue> {
             if step < 1 {
                 step = 1;
             }
-            ctx.set_stroke_style(&JsValue::from_str(colors[idx % colors.len()]));
+            ctx.set_stroke_style_str(colors[idx % colors.len()]);
             ctx.set_line_width(1.0);
             ctx.begin_path();
             let mut started = false;
@@ -376,7 +376,7 @@ fn draw_axes(
     let plot_right = plot_left + plot_width;
     let plot_bottom = plot_top + plot_height;
 
-    ctx.set_stroke_style(&JsValue::from_str(axis));
+    ctx.set_stroke_style_str(axis);
     ctx.set_line_width(1.0);
     ctx.begin_path();
     ctx.move_to(plot_left, plot_top);
@@ -384,7 +384,7 @@ fn draw_axes(
     ctx.line_to(plot_right, plot_bottom);
     ctx.stroke();
 
-    ctx.set_fill_style(&JsValue::from_str(text));
+    ctx.set_fill_style_str(text);
     ctx.set_font("12px sans-serif");
 
     let x_ticks = nice_ticks(x_min, x_max, AXIS_TICK_COUNT);
