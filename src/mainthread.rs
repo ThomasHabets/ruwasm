@@ -32,6 +32,11 @@ thread_local! {
     static FILE: RefCell<Option<File>> = const { RefCell::new(None) };
 }
 
+pub(crate) fn post_message(msg: MainToWorker) -> Result<(), JsValue> {
+    let msg = msg.try_into()?;
+    worker().post_message(&msg)
+}
+
 pub async fn sleep(duration: std::time::Duration) {
     let ms_u128 = duration.as_millis();
     let ms = u32::try_from(ms_u128).unwrap_or(u32::MAX);
@@ -76,14 +81,10 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
                 }
             };
             if data.is_empty() {
-                worker()
-                    .post_message(&MainToWorker::Eof(rcv).try_into()?)
-                    .unwrap();
+                post_message(MainToWorker::Eof(rcv)).unwrap();
             } else {
                 info!("Main: Sending back data len {}", data.len());
-                worker()
-                    .post_message(&MainToWorker::Data(rcv, data).try_into()?)
-                    .unwrap();
+                post_message(MainToWorker::Data(rcv, data)).unwrap();
             }
         }
         WorkerToMain::Ready => {
@@ -102,9 +103,7 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
             crate::time_sink::update(streams)?;
         }
         WorkerToMain::Ping(t) => {
-            worker()
-                .post_message(&MainToWorker::Pong(t).try_into()?)
-                .unwrap();
+            post_message(MainToWorker::Pong(t)).unwrap();
         }
         WorkerToMain::Pong(from) => {
             let to = js_performance_now();
@@ -135,7 +134,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
     {
         let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
             info!("ping button clicked");
-            worker().post_message(&MainToWorker::Ping(js_performance_now()).try_into()?)?;
+            post_message(MainToWorker::Ping(js_performance_now()))?;
             Ok(())
         });
         let btn = get_element(ID_PING)?.dyn_into::<web_sys::HtmlButtonElement>()?;
@@ -153,7 +152,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
                 .parse()
                 .map_err(|e| JsValue::from_str(&format!("parsing sample rate: {e}")))?;
             crate::time_sink::set_sample_rate(samp_rate as f64);
-            worker().post_message(&MainToWorker::Start { samp_rate }.try_into()?)?;
+            post_message(MainToWorker::Start { samp_rate })?;
             get_element(ID_FILE_INPUT)?
                 .dyn_into::<HtmlInputElement>()?
                 .set_disabled(false);
