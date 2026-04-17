@@ -36,6 +36,9 @@ thread_local! {
 /// Handle message sent from the worker.
 async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
     match e.data().try_into()? {
+        WorkerToMain::ReqData(_) => {
+            // TODO
+        }
         WorkerToMain::Ready => {
             info!("Main: Received WorkerToMain::Ready");
             worker_msg_ready().await?;

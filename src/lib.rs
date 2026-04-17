@@ -80,6 +80,9 @@ enum WorkerToMain {
     /// Original ping timestamp is returned.
     Pong(f64),
 
+    /// Request more data.
+    ReqData(ReceiverId),
+
     /// At the end of execution, provide the result as a string.
     Result(String),
 

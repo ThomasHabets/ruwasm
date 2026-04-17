@@ -29,6 +29,11 @@ thread_local! {
     static GRAPH_COMMS: OnceCell<Rc<futures_intrusive::sync::LocalMutex<GraphComms>>> = const { OnceCell::new() };
 }
 
+pub(crate) fn post_message(v: &JsValue) -> Result<(), JsValue> {
+    let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
+    scope.post_message(v)
+}
+
 /// Handle message sent from Main thread to worker.
 async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
     let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;

@@ -1,6 +1,8 @@
-use rustradio::Result;
 use rustradio::block::{Block, BlockRet};
 use rustradio::stream::{ReadStream, WriteStream, new_stream};
+use rustradio::{Error, Result};
+
+use crate::{WorkerToMain, worker::post_message};
 
 // TODO: magic value.
 const PRODUCE_CHANNEL_SIZE: usize = 10;
@@ -14,6 +16,7 @@ pub enum Msg {
 pub struct WasmSource {
     buf: Vec<u8>,
     eof: bool,
+    outstanding_req: bool,
     rx: async_channel::Receiver<Msg>,
     #[rustradio(out)]
     dst: WriteStream<u8>,
@@ -29,6 +32,7 @@ impl WasmSource {
                 dst,
                 eof: false,
                 rx,
+                outstanding_req: false,
             },
             src,
             tx,
@@ -40,13 +44,30 @@ impl WasmSource {
     fn extend(&mut self, data: &[u8]) {
         self.buf.extend(data);
     }
+    fn req_more(&mut self) -> Result<()> {
+        if !self.outstanding_req {
+            WorkerToMain::ReqData(crate::RECEIVER_SOURCE)
+                .try_into()
+                .map(|m| post_message(&m))
+                .flatten()
+                .map_err(|e| Error::msg(&format!("{e:?}")))?;
+            self.outstanding_req = true;
+        }
+        Ok(())
+    }
     fn check_msgs(&mut self) {
         loop {
             match self.rx.try_recv() {
                 Err(async_channel::TryRecvError::Empty) => break,
                 Err(async_channel::TryRecvError::Closed) => break,
-                Ok(Msg::Eof) => self.set_eof(),
-                Ok(Msg::Extend(v)) => self.extend(&v),
+                Ok(Msg::Eof) => {
+                    self.set_eof();
+                    self.outstanding_req = false;
+                }
+                Ok(Msg::Extend(v)) => {
+                    self.extend(&v);
+                    self.outstanding_req = false;
+                }
             }
         }
     }
@@ -60,6 +81,7 @@ impl Block for WasmSource {
                 if self.eof {
                     return Ok(BlockRet::EOF);
                 } else {
+                    self.req_more()?;
                     return Ok(BlockRet::Pending);
                 }
             }
