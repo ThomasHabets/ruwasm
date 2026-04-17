@@ -1,7 +1,6 @@
 use log::info;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
-use web_sys::js_sys::Uint8Array;
 
 mod float_sink;
 mod mainthread;
@@ -81,7 +80,7 @@ enum WorkerToMain {
     Pong(f64),
 
     /// Request more data.
-    ReqData(ReceiverId),
+    ReqData(ReceiverId, u64, u64),
 
     /// At the end of execution, provide the result as a string.
     Result(String),
@@ -144,11 +143,14 @@ pub fn add(a: i32, b: i32) -> String {
     format!("Add results: {}", a + b)
 }
 
+/*
+use web_sys::js_sys::Uint8Array;
 pub(crate) fn uint8array_to_vec(arr: &Uint8Array) -> Vec<u8> {
     let mut buf = vec![0; arr.length() as usize];
     arr.copy_to(&mut buf);
     buf
 }
+*/
 
 #[cfg(test)]
 mod tests {

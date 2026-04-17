@@ -6,6 +6,7 @@ use crate::{WorkerToMain, worker::post_message};
 
 // TODO: magic value.
 const PRODUCE_CHANNEL_SIZE: usize = 10;
+const CHUNK_SIZE: u64 = 65536;
 
 pub enum Msg {
     Eof,
@@ -16,6 +17,7 @@ pub enum Msg {
 pub struct WasmSource {
     buf: Vec<u8>,
     eof: bool,
+    pos: u64,
     outstanding_req: bool,
     rx: async_channel::Receiver<Msg>,
     #[rustradio(out)]
@@ -33,6 +35,7 @@ impl WasmSource {
                 eof: false,
                 rx,
                 outstanding_req: false,
+                pos: 0,
             },
             src,
             tx,
@@ -46,11 +49,12 @@ impl WasmSource {
     }
     fn req_more(&mut self) -> Result<()> {
         if !self.outstanding_req {
-            WorkerToMain::ReqData(crate::RECEIVER_SOURCE)
-                .try_into()
-                .map(|m| post_message(&m))
-                .flatten()
-                .map_err(|e| Error::msg(&format!("{e:?}")))?;
+            post_message(WorkerToMain::ReqData(
+                crate::RECEIVER_SOURCE,
+                self.pos,
+                CHUNK_SIZE,
+            ))
+            .map_err(|e| Error::msg(&format!("{e:?}")))?;
             self.outstanding_req = true;
         }
         Ok(())
@@ -65,6 +69,7 @@ impl WasmSource {
                     self.outstanding_req = false;
                 }
                 Ok(Msg::Extend(v)) => {
+                    self.pos += v.len() as u64;
                     self.extend(&v);
                     self.outstanding_req = false;
                 }

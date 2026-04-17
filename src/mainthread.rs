@@ -6,17 +6,15 @@ use std::rc::Rc;
 
 use log::{debug, info};
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::spawn_local;
+use wasm_bindgen_futures::{JsFuture, spawn_local};
+use web_sys::js_sys;
 use web_sys::js_sys::Uint8Array;
-use web_sys::{
-    Element, Event, File, FileReader, HtmlInputElement, MessageEvent, ProgressEvent, Worker,
-};
+use web_sys::{Element, Event, File, HtmlInputElement, MessageEvent, Worker};
 
 use crate::FloatStream;
 use crate::RECEIVER_SOURCE;
 use crate::ReceiverId;
 use crate::js_performance_now;
-use crate::uint8array_to_vec;
 use crate::{MainToWorker, WorkerToMain};
 
 const HTML_DISABLED: &str = "disabled";
@@ -31,13 +29,62 @@ const ID_HTML: &str = "root-html";
 thread_local! {
     static WORKER: OnceCell<Worker> = const { OnceCell::new() };
     static LATEST_FLOAT_STREAMS: RefCell<Vec<FloatStream>> = const { RefCell::new(Vec::new()) };
+    static FILE: RefCell<Option<File>> = const { RefCell::new(None) };
+}
+
+pub async fn sleep(duration: std::time::Duration) {
+    let ms_u128 = duration.as_millis();
+    let ms = u32::try_from(ms_u128).unwrap_or(u32::MAX);
+    let timeout = i32::try_from(ms).unwrap_or(i32::MAX);
+
+    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+        let cb = Closure::once_into_js(move || {
+            let _ = resolve.call0(&wasm_bindgen::JsValue::NULL);
+        });
+
+        web_sys::window()
+            .unwrap()
+            .set_timeout_with_callback_and_timeout_and_arguments_0(cb.unchecked_ref(), timeout)
+            .unwrap();
+    });
+
+    let _ = JsFuture::from(promise).await;
+}
+
+async fn read_data(start: u64, size: u64) -> Result<Vec<u8>, JsValue> {
+    let file = FILE
+        .with(|slot| slot.borrow().clone())
+        .ok_or_else(|| wasm_bindgen::JsValue::from_str("no file set"))?;
+    let blob = file.slice_with_f64_and_f64(start as f64, (start + size) as f64)?;
+    let js = JsFuture::from(blob.array_buffer()).await?;
+    let buf: js_sys::ArrayBuffer = js.dyn_into()?;
+    Ok(Uint8Array::new(&buf).to_vec())
 }
 
 /// Handle message sent from the worker.
 async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
     match e.data().try_into()? {
-        WorkerToMain::ReqData(_) => {
-            // TODO
+        WorkerToMain::ReqData(rcv, pos, size) => {
+            info!("Main: Received WorkerToMain::ReqData");
+            let data = loop {
+                match read_data(pos, size).await {
+                    Ok(o) => break o,
+                    Err(e) => {
+                        info!("Main: file err: {e:?}");
+                        sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                }
+            };
+            if data.is_empty() {
+                worker()
+                    .post_message(&MainToWorker::Eof(rcv).try_into()?)
+                    .unwrap();
+            } else {
+                info!("Main: Sending back data len {}", data.len());
+                worker()
+                    .post_message(&MainToWorker::Data(rcv, data).try_into()?)
+                    .unwrap();
+            }
         }
         WorkerToMain::Ready => {
             info!("Main: Received WorkerToMain::Ready");
@@ -227,9 +274,9 @@ WASM built by Rust version: {}"#,
 }
 
 fn install_file_chunk_listener(
-    id: ReceiverId,
+    _id: ReceiverId,
     input: HtmlInputElement,
-    chunk_size: u64,
+    _chunk_size: u64,
 ) -> Result<(), JsValue> {
     info!("Adding listener");
     let input = Rc::new(input);
@@ -247,9 +294,9 @@ fn install_file_chunk_listener(
                 .dyn_into::<web_sys::HtmlInputElement>()?
                 .set_disabled(true);
             set_content(ID_RESULT, "Running rustradio on input…")?;
-            if let Err(err) = read_file_in_chunks(id, file, chunk_size) {
-                web_sys::console::error_1(&err);
-            }
+            FILE.with(|slot| {
+                *slot.borrow_mut() = Some(file);
+            });
             Ok(())
         }));
 
@@ -258,120 +305,4 @@ fn install_file_chunk_listener(
     info!("Done Adding event listener");
     on_change.forget();
     Ok(())
-}
-
-fn read_file_in_chunks(id: ReceiverId, file: File, chunk_size: u64) -> Result<(), JsValue> {
-    let file_size = file.size() as u64;
-    let offset = Rc::new(RefCell::new(0u64));
-    let file = Rc::new(file);
-
-    let read_next: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
-    let read_next_clone = Rc::clone(&read_next);
-
-    *read_next.borrow_mut() = Some(Box::new({
-        let offset = Rc::clone(&offset);
-        let file = Rc::clone(&file);
-
-        move || {
-            let start = *offset.borrow();
-            if start >= file_size {
-                post_eof(id);
-                return;
-            }
-
-            let end = (start + chunk_size).min(file_size);
-            let blob = match file.slice_with_f64_and_f64(start as f64, end as f64) {
-                Ok(b) => b,
-                Err(err) => {
-                    web_sys::console::error_1(&err);
-                    return;
-                }
-            };
-
-            let reader = Rc::new(match FileReader::new() {
-                Ok(r) => r,
-                Err(err) => {
-                    web_sys::console::error_1(&err);
-                    return;
-                }
-            });
-
-            let next_offset = Rc::clone(&offset);
-            let next_read = Rc::clone(&read_next_clone);
-            let file_name = file.name();
-            let chunk_index = (start / chunk_size) as u32;
-            let is_last = end == file_size;
-
-            let onload = {
-                let reader = Rc::clone(&reader);
-                Closure::<dyn FnMut(ProgressEvent)>::wrap(Box::new(move |_e: ProgressEvent| {
-                    let Ok(result) = reader.result() else {
-                        web_sys::console::error_1(&JsValue::from_str(
-                            "FileReader returned no result",
-                        ));
-                        return;
-                    };
-
-                    let bytes = Uint8Array::new(&result);
-                    let v = uint8array_to_vec(&bytes);
-                    post_chunk_message(
-                        id,
-                        &file_name,
-                        chunk_index,
-                        start,
-                        end,
-                        file_size,
-                        is_last,
-                        v,
-                    );
-
-                    *next_offset.borrow_mut() = end;
-
-                    if let Some(next) = next_read.borrow().as_ref() {
-                        next();
-                    }
-                }))
-            };
-
-            reader.set_onload(Some(onload.as_ref().unchecked_ref()));
-            onload.forget();
-
-            if let Err(err) = reader.read_as_array_buffer(&blob) {
-                web_sys::console::error_1(&err);
-            }
-        }
-    }));
-
-    if let Some(f) = read_next.borrow().as_ref() {
-        f();
-    }
-    info!("Read file in chunks done");
-    Ok(())
-}
-
-fn post_eof(id: ReceiverId) {
-    info!("Main: Post EOF");
-    worker()
-        .post_message(&MainToWorker::Eof(id).try_into().unwrap())
-        .unwrap();
-}
-
-fn post_chunk_message(
-    id: ReceiverId,
-    _file_name: &str,
-    _chunk_index: u32,
-    start: u64,
-    _end: u64,
-    file_size: u64,
-    _is_last: bool,
-    data: Vec<u8>,
-) {
-    info!(
-        "Main: Post chunk message of len {}. Percent: {}",
-        data.len(),
-        100 * start / file_size
-    );
-    worker()
-        .post_message(&MainToWorker::Data(id, data).try_into().unwrap())
-        .unwrap();
 }
