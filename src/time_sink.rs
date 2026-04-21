@@ -360,6 +360,7 @@ fn draw_graph() -> Result<(), JsValue> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_axes(
     ctx: &CanvasRenderingContext2d,
     axis: &str,

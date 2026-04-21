@@ -54,7 +54,7 @@ impl WasmSource {
                 self.pos,
                 CHUNK_SIZE,
             ))
-            .map_err(|e| Error::msg(&format!("{e:?}")))?;
+            .map_err(|e| Error::msg(format!("{e:?}")))?;
             self.outstanding_req = true;
         }
         Ok(())
