@@ -177,7 +177,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
         // TODO: make some sort of UI friendly bounded channel. Don't want it to
         // block.
         info!("Main: installing file chunk handler");
-        install_file_chunk_listener(RECEIVER_SOURCE, input, 64 * 1024)?; // 64 KiB chunks
+        install_file_chunk_listener(RECEIVER_SOURCE, input)?; // 64 KiB chunks
     }
     Ok(())
 }
@@ -189,6 +189,7 @@ fn worker() -> Worker {
             info!("Main: Starting the worker");
             let opts = web_sys::WorkerOptions::new();
             opts.set_type(web_sys::WorkerType::Module);
+            opts.set_name("RustRadio worker");
             let worker = Worker::new_with_options("./wasm-mod.js", &opts).unwrap();
 
             // Set message handler.
@@ -216,6 +217,17 @@ fn worker() -> Worker {
             );
             worker.set_onmessageerror(Some(onmsgerr.as_ref().unchecked_ref()));
             onmsgerr.forget();
+
+            // Set error handler.
+            let onerr = Closure::<dyn FnMut(MessageEvent) -> Result<(), JsValue>>::new(
+                move |e: MessageEvent| {
+                    // TODO: Surface error on page.
+                    error!("Main: Worker error: {e:?}");
+                    Ok(())
+                },
+            );
+            worker.set_onerror(Some(onerr.as_ref().unchecked_ref()));
+            onerr.forget();
 
             worker
         })
@@ -286,7 +298,6 @@ WASM built by Rust version: {}"#,
 fn install_file_chunk_listener(
     _id: ReceiverId,
     input: HtmlInputElement,
-    _chunk_size: u64,
 ) -> Result<(), JsValue> {
     info!("Adding listener");
     let input = Rc::new(input);
