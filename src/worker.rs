@@ -7,7 +7,7 @@ use rustradio::blocks::*;
 use rustradio::graph::GraphRunner;
 use rustradio::stream::ReadStream;
 
-use log::{info, trace};
+use log::{error, info, trace};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
@@ -121,6 +121,17 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
     let global = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
     global.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
     onmessage.forget();
+
+    // Set messageerror handler.
+    let onmsgerr =
+        Closure::<dyn FnMut(MessageEvent) -> Result<(), JsValue>>::new(move |e: MessageEvent| {
+            // TODO: Surface error on page.
+            error!("Worker: Message Error: {e:?}");
+            Ok(())
+        });
+    global.set_onmessageerror(Some(onmsgerr.as_ref().unchecked_ref()));
+    onmsgerr.forget();
+
     global.post_message(&WorkerToMain::Ready.try_into()?)?;
     info!("Done setting up worker");
 

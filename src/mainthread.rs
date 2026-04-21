@@ -4,7 +4,7 @@ use std::cell::OnceCell;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use log::{debug, info};
+use log::{debug, error, info};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::js_sys;
@@ -191,20 +191,31 @@ fn worker() -> Worker {
             opts.set_type(web_sys::WorkerType::Module);
             let worker = Worker::new_with_options("./wasm-mod.js", &opts).unwrap();
 
+            // Set message handler.
             let onmessage = Closure::<dyn FnMut(MessageEvent) -> Result<(), JsValue>>::new(
                 move |e: MessageEvent| {
                     spawn_local(async move {
                         if let Err(e) = worker_msg(e).await {
                             // TODO: Surface error on page.
-                            info!("Inner receiver thing: {e:?}");
+                            error!("Main: Inner receiver thing: {e:?}");
                         }
                     });
                     Ok(())
                 },
             );
-
             worker.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
             onmessage.forget();
+
+            // Set messageerror handler.
+            let onmsgerr = Closure::<dyn FnMut(MessageEvent) -> Result<(), JsValue>>::new(
+                move |e: MessageEvent| {
+                    // TODO: Surface error on page.
+                    error!("Main: Message Error: {e:?}");
+                    Ok(())
+                },
+            );
+            worker.set_onmessageerror(Some(onmsgerr.as_ref().unchecked_ref()));
+            onmsgerr.forget();
 
             worker
         })
