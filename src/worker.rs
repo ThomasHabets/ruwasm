@@ -112,7 +112,6 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
         // a level of indirection. :-)
         spawn_local(async move {
             if let Err(e) = worker_msg(event).await {
-                // TODO: send error.
                 info!("Worker message handler failed: {e:?}");
             }
         });
@@ -125,7 +124,6 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
     // Set messageerror handler.
     let onmsgerr =
         Closure::<dyn FnMut(MessageEvent) -> Result<(), JsValue>>::new(move |e: MessageEvent| {
-            // TODO: Surface error on page.
             error!("Worker: Message Error: {e:?}");
             Ok(())
         });

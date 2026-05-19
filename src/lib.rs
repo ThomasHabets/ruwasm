@@ -9,6 +9,7 @@ mod wasm_graph;
 mod wasm_source;
 mod worker;
 mod domlogger;
+mod workerlogger;
 
 const RECEIVER_SOURCE: ReceiverId = ReceiverId(0);
 
@@ -86,6 +87,12 @@ enum WorkerToMain {
     /// At the end of execution, provide the result as a string.
     Result(String),
 
+    /// A worker log line to be emitted through the main thread logger.
+    LogLine {
+        level: log::Level,
+        line: String,
+    },
+
     /// Float streams captured in the worker graph.
     FloatStreams(Vec<FloatStream>),
 }
@@ -113,16 +120,17 @@ pub async fn start() -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
     if web_sys::window().is_none() {
         // Init logging.
-        console_log::init_with_level(log::Level::Debug).expect("Failed to init logging");
-        info!("Logging initialized (expect this message is once for UI thread and worker)");
+        workerlogger::init_logging().expect("Failed to init worker logging");
+        // console_log::init_with_level(log::Level::Debug).expect("Failed to init logging");
+        info!("Worker logging initialized");
         info!("Worker: Starting at time {}", js_performance_now());
 
         worker::setup().await
     } else {
         info!("Main: Starting at time {}", js_performance_now());
         domlogger::init_logging().expect("failed to init logging");
+        info!("Main logging initialized");
         mainthread::setup().await
-
     }
 }
 

@@ -95,6 +95,9 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
             set_content(ID_RESULT, &s)?;
             info!("Main: worker returned: {s}");
         }
+        WorkerToMain::LogLine { level, line } => {
+            log::log!(level, "[worker] {line}");
+        }
         WorkerToMain::FloatStreams(streams) => {
             info!("Main: received {} float stream(s)", streams.len());
             for (n, s) in streams.iter().enumerate() {
