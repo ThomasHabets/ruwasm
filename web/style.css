@@ -278,9 +278,8 @@ h1 {
   font-size: 0.88rem;
 }
 
-.runtime-log {
-  min-height: 9rem;
-  max-height: 18rem;
+.runtime-log,
+.event-log {
   margin: 0;
   overflow: auto;
   border-radius: 6px;
@@ -289,6 +288,16 @@ h1 {
   color: var(--text);
   font: 0.88rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   white-space: pre-wrap;
+}
+
+.runtime-log {
+  min-height: 9rem;
+  max-height: 18rem;
+}
+
+.event-log {
+  min-height: 18rem;
+  max-height: min(42rem, calc(100vh - 10rem));
 }
 
 .visualization-grid {
