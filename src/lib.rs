@@ -8,6 +8,7 @@ mod time_sink;
 mod wasm_graph;
 mod wasm_source;
 mod worker;
+mod domlogger;
 
 const RECEIVER_SOURCE: ReceiverId = ReceiverId(0);
 
@@ -109,17 +110,19 @@ impl TryFrom<wasm_bindgen::JsValue> for WorkerToMain {
 /// calls out to the respective special setups.
 #[wasm_bindgen(start)]
 pub async fn start() -> Result<(), JsValue> {
-    // Init logging.
-    console_log::init_with_level(log::Level::Debug).expect("Failed to init logging");
-    info!("Logging initialized (expect this message is once for UI thread and worker)");
     console_error_panic_hook::set_once();
-
     if web_sys::window().is_none() {
+        // Init logging.
+        console_log::init_with_level(log::Level::Debug).expect("Failed to init logging");
+        info!("Logging initialized (expect this message is once for UI thread and worker)");
         info!("Worker: Starting at time {}", js_performance_now());
+
         worker::setup().await
     } else {
         info!("Main: Starting at time {}", js_performance_now());
+        domlogger::init_logging().expect("failed to init logging");
         mainthread::setup().await
+
     }
 }
 
