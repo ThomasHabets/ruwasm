@@ -1,105 +1,155 @@
 <!DOCTYPE html>
-<html id="root-html" data-git-version="GIT_VERSION_NOT_SET">
+<html id="root-html" lang="en" data-git-version="GIT_VERSION_NOT_SET">
 <head>
-    <meta charset="utf-8">
-    <title>Minimal Rust WASM</title>
-    <style>
-  body {
-    background: #fff;
-    color: #000;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    body {
-      background: #000;
-      color: #fff;
-    }
-  }
-  .left-pad {
-          padding-left: 3em;
-  }
-  #form-rr {
-          display: inline-grid;
-  }
-  #graph-controls {
-          display: grid;
-          grid-template-columns: auto auto auto auto auto auto;
-          gap: 0.5em 0.75em;
-          align-items: center;
-  }
-  #float-graph {
-          width: 100%;
-          max-width: 960px;
-          height: 260px;
-          border: 1px solid #888;
-          background: #f9f9f9;
-  }
-  @media (prefers-color-scheme: dark) {
-    #float-graph {
-      border-color: #555;
-      background: #111;
-    }
-  }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RustRadio WASM AX.25 decoder</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <h1>Rust WASM RustRadio Example</h1>
-    <h2>Instructions</h2>
-    <p>
-      First ensure WASM is fully loaded. The buttons should become enabled, and
-      a massage with some WASM status gets added to the bottom.
-    </p> <p>
-      You can click the "add" button to run a simple test, making sure that WASM
-      works. "Ping" sends a message all the way to the web worker, and should
-      give the RTT in milliseconds.
-    </p> <p>
-      Then you can start the rustradio graph and upload a 32bit complex float
-      I/Q via the browse button. It'll use 50ksps by default. Rustradio will run
-      on it, and will give you the bytes for the first 1200bps AX.25 packet
-      decoded.
-    </p>
-    <p>
-        The <a href="https://github.com/ThomasHabets/ruwasm">code is on github</a>,
-        though I plan to integrate it as an example in the <a
-        href="https://github.com/ThomasHabets/rustradio">RustRadio</a>
-        project.
-    </p>
-
-    <h3>Test stuff</h3>
-    <div class="left-pad">
-    <button id="btn-add" disabled>Add 5 + 3</button>
-    <button id="btn-ping" disabled>Send ping</button>
+  <header class="app-header">
+    <div class="header-inner">
+      <div>
+              <!-- <p class="eyebrow">Rust WASM AX.25 receiver</p> -->
+        <h1>RustRadio WASM AX.25 decoder</h1>
+        <p class="header-copy">
+                Example of RustRadio running 100% in the browser as WASM.
+                <ol>
+                        <li>Enter the correct sample rate</li>
+                        <li>Start the rustradio graph (big button, below)</li>
+                        <li>Upload an I/Q capture file (file selector just below
+                        that)</li>
+                </ol>
+        </p>
+      </div>
+      <nav class="header-links" aria-label="Project links">
+        <a href="https://github.com/ThomasHabets/ruwasm">ruwasm</a>
+        <a href="https://github.com/ThomasHabets/rustradio">RustRadio</a>
+      </nav>
     </div>
+  </header>
 
-    <h3>Rustradio graph</h3>
-    <div id="form-rr" class="left-pad">
-    <label for="input-samp-rate">Sample rate</label>
-    <input id="input-samp-rate" value="50000" /><br/>
-    <button id="btn-start" disabled>Start RustRadio graph</button><br/>
-    <label for="fileInput">Input file in 32bit complex I/Q. <a
-           href="https://cement.retrofitta.se/tmp/aprs1200_50ksps.c32">Example
-           file</a></label>
-    <input type="file" id="fileInput" disabled />
-    </div>
+  <main class="app-main">
+    <aside class="sidebar" aria-label="Receiver controls">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Runtime</h2>
+            <p class="panel-kicker">WASM status and worker messages</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <pre id="result" class="runtime-log" aria-live="polite">Loading WASM runtime...</pre>
+        </div>
+      </section>
 
-    <h3>Signal strength</h3>
-    <div id="graph-controls" class="left-pad">
-      <label for="graph-y-min">Y min</label>
-      <input id="graph-y-min" value="-1" />
-      <label for="graph-y-max">Y max</label>
-      <input id="graph-y-max" value="1" />
-      <button id="graph-y-apply">Apply</button>
-      <button id="graph-y-zoom-in">Zoom In</button>
-      <button id="graph-y-zoom-out">Zoom Out</button>
-      <button id="graph-y-auto">Auto Scale</button>
-    </div>
-    <div class="left-pad">
-      <canvas id="float-graph"></canvas>
-    </div>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Diagnostics</h2>
+            <p class="panel-kicker">Browser and worker round trips</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="action-row">
+            <button id="btn-add" type="button" disabled>Add 5 + 3</button>
+            <button id="btn-ping" type="button" disabled>Send ping</button>
+          </div>
+        </div>
+      </section>
 
-    <h2>From wasm</h2>
-    <pre id="result"></pre>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Receiver</h2>
+            <p class="panel-kicker">32-bit complex I/Q input</p>
+          </div>
+        </div>
+        <div id="form-rr" class="panel-body control-stack">
+          <div class="field-group">
+            <label for="input-samp-rate">Sample rate</label>
+            <input id="input-samp-rate" type="number" min="1" step="1" value="50000" inputmode="numeric">
+          </div>
+          <button id="btn-start" class="primary-action" type="button" disabled>Start RustRadio graph</button>
+          <div class="field-group">
+            <label for="fileInput">I/Q capture file</label>
+            <input type="file" id="fileInput" disabled>
+            <p class="file-note">
+              Example:
+              <a href="https://cement.retrofitta.se/tmp/aprs1200_50ksps.c32">aprs1200_50ksps.c32</a>
+            </p>
+          </div>
+        </div>
+      </section>
+    </aside>
 
-    <script type="module" src="wasm-mod.js"></script>
+    <section class="workspace" aria-label="Visualization workspace">
+      <div class="visualization-grid">
+        <section class="panel visual-panel-wide" data-viz-slot="time-series">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">Signal Strength</h2>
+              <p class="panel-kicker">Float stream amplitude over time</p>
+            </div>
+            <div id="graph-controls" aria-label="Graph scale controls">
+              <div class="control-field">
+                <label for="graph-y-min">Y min</label>
+                <input id="graph-y-min" type="number" step="any" value="-1">
+              </div>
+              <div class="control-field">
+                <label for="graph-y-max">Y max</label>
+                <input id="graph-y-max" type="number" step="any" value="1">
+              </div>
+              <button id="graph-y-apply" type="button">Apply</button>
+              <button id="graph-y-zoom-in" type="button">Zoom In</button>
+              <button id="graph-y-zoom-out" type="button">Zoom Out</button>
+              <button id="graph-y-auto" type="button">Auto Scale</button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <canvas id="float-graph"></canvas>
+          </div>
+        </section>
+
+        <!-- Future plot slots can be replaced with canvases while keeping the grid. -->
+        <section class="panel visual-panel" data-viz-slot="constellation">
+          <div class="panel-header">
+            <div>
+              <h3 class="panel-title">Constellation (not implemented yet)</h3>
+              <p class="panel-kicker">Symbol plane</p>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="plot-surface" aria-hidden="true">
+              <span class="slot-label">Ready</span>
+              <div class="constellation-points">
+                <span style="--x: 32%; --y: 34%;"></span>
+                <span style="--x: 68%; --y: 35%;"></span>
+                <span style="--x: 35%; --y: 68%;"></span>
+                <span style="--x: 66%; --y: 66%;"></span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel visual-panel" data-viz-slot="spectrum">
+          <div class="panel-header">
+            <div>
+              <h3 class="panel-title">Spectrum (not implemented yet)</h3>
+              <p class="panel-kicker">Frequency domain</p>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="plot-surface" aria-hidden="true">
+              <span class="slot-label">Ready</span>
+              <div class="spectrum-trace"></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="wasm-mod.js"></script>
 </body>
 </html>
