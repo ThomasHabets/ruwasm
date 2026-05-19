@@ -254,7 +254,7 @@ pub(crate) fn get_element(id: &str) -> Result<Element, JsValue> {
 
 /// Set content of element.
 fn set_content(id: &str, content: &str) -> Result<(), JsValue> {
-    info!("Setting inner HTML of {id}");
+    debug!("Setting inner HTML of {id}");
     get_element(id)?.set_inner_html(content);
     Ok(())
 }
