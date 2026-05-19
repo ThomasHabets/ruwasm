@@ -2,13 +2,13 @@ use log::info;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
+mod domlogger;
 mod float_sink;
 mod mainthread;
 mod time_sink;
 mod wasm_graph;
 mod wasm_source;
 mod worker;
-mod domlogger;
 mod workerlogger;
 
 const RECEIVER_SOURCE: ReceiverId = ReceiverId(0);

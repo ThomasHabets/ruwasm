@@ -298,10 +298,7 @@ WASM built by Rust version: {}"#,
     Ok(())
 }
 
-fn install_file_chunk_listener(
-    _id: ReceiverId,
-    input: HtmlInputElement,
-) -> Result<(), JsValue> {
+fn install_file_chunk_listener(_id: ReceiverId, input: HtmlInputElement) -> Result<(), JsValue> {
     info!("Adding listener");
     let input = Rc::new(input);
     let input2 = input.clone();

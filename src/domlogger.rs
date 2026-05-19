@@ -50,18 +50,18 @@ impl Log for DomConsoleLogger {
         };
 
         let mut lines = self.log_lines.lock().unwrap();
-            lines.push_back(line);
-            while lines.len() > MAX_LOG_MESSAGES {
-                lines.pop_front();
-            }
+        lines.push_back(line);
+        while lines.len() > MAX_LOG_MESSAGES {
+            lines.pop_front();
+        }
 
-            let mut content = String::new();
-            for line in lines.iter() {
-                content.push_str(line);
-                content.push('\n');
-            }
-            el.set_inner_text(&content);
-            el.set_scroll_top(el.scroll_height());
+        let mut content = String::new();
+        for line in lines.iter() {
+            content.push_str(line);
+            content.push('\n');
+        }
+        el.set_inner_text(&content);
+        el.set_scroll_top(el.scroll_height());
     }
 
     fn flush(&self) {}
