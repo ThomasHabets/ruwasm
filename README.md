@@ -1,16 +1,18 @@
 # Temporary repo, to be moved into rustradio as an example
 
-cargo install wasm-pack
-wasm-pack build --target web
-stuff now gets added to pkg/, and needs to work with the HTML and JS in web/
-
 ```
-clear \
-&& wasm-pack build --target web --dev \
-&& scp -r web/*.html web/*.js pkg/*.wasm pkg/*.js example.com:/var/www/wasm/
+./build-local.sh \
+    && ssh example.com "cd /var/www/wasm/ && tar xfz -" < ruwasm.tgz
 ```
 
-`--dev` in order to get backtraces.
+## TODO
+
+* Send the shape of the graph for graphviz-like rendering.
+* Send log lines to a text box.
+* Send decodes to a text box too.
+* Make most of time sink in HTML templated instead of assuming HTML has it.
+* Waterfall sink.
+* Fix the crashing bug on large inputs.
 
 ## Useful links
 
