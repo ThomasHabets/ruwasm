@@ -66,6 +66,15 @@ impl TryFrom<wasm_bindgen::JsValue> for MainToWorker {
     }
 }
 
+/// Named payload for worker data requests, sent across the worker/main boundary
+/// so the UI thread can route a receiver read to either file or stream input.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+struct ReqData {
+    receiver: ReceiverId,
+    pos: u64,
+    size: u64,
+}
+
 /// Messages from the worker to the main (UI) thread.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
@@ -82,7 +91,7 @@ enum WorkerToMain {
     Pong(f64),
 
     /// Request more data.
-    ReqData(ReceiverId, u64, u64),
+    ReqData(ReqData),
 
     /// At the end of execution, provide the result as a string.
     Result(String),

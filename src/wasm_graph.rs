@@ -1,4 +1,4 @@
-use log::info;
+use log::{trace, info};
 
 //use futures::channel::mpsc;
 //use futures::StreamExt;
@@ -24,10 +24,12 @@ impl WasmGraph {
             let mut need_more = false;
             for (n, b) in self.blocks.iter_mut().enumerate() {
                 let name = b.block_name().to_owned();
+                trace!("Running graph node {name}");
                 if eof[n] {
                     continue;
                 }
                 let ret = b.work()?;
+                trace!("graph node {name} work ended");
                 match ret {
                     BlockRet::EOF => {
                         eof[n] = true;

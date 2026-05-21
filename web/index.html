@@ -17,8 +17,7 @@
                 <ol>
                         <li>Enter the correct sample rate</li>
                         <li>Start the rustradio graph (big button, below)</li>
-                        <li>Upload an I/Q capture file (file selector just below
-                        that)</li>
+                        <li>Upload an I/Q capture file or connect a WebSocket source</li>
                 </ol>
         </p>
       </div>
@@ -78,6 +77,11 @@
               Example:
               <a href="https://cement.retrofitta.se/tmp/aprs1200_50ksps.c32">aprs1200_50ksps.c32</a>
             </p>
+          </div>
+          <div class="field-group">
+            <label for="input-ws-url">WebSocket capture URL</label>
+            <input id="input-ws-url" type="url" placeholder="ws://localhost:8080/" disabled>
+            <button id="btn-ws-connect" type="button" disabled>Connect WebSocket stream</button>
           </div>
         </div>
       </section>

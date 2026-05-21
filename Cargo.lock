@@ -563,9 +563,9 @@ dependencies = [
 
 [[package]]
 name = "rustradio"
-version = "0.16.3"
+version = "0.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99ff39b49e0899add5d69152eb387d93f332bbd6fb014d966072f870f3596fdd"
+checksum = "bf005051bad4732a0facdc1bed7a98f2cb59e10d0e61f1d97e5770a7c36ee3a1"
 dependencies = [
  "async-trait",
  "fast-math",
@@ -588,9 +588,9 @@ dependencies = [
 
 [[package]]
 name = "rustradio_macros"
-version = "0.16.3"
+version = "0.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "570a6d05508d7fd11349ec673d7f73b2bf43f04789ce248561215388f85d450b"
+checksum = "539aa0fa6276a0cfe3a0e3fadd118b672833a61b1a01533269edcbff5264e35c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -600,9 +600,9 @@ dependencies = [
 
 [[package]]
 name = "rustradio_macros_code"
-version = "0.16.3"
+version = "0.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10acdd9035599d2d1a797be4b987b12ef5bf37c5025975a726b814c9aea6975f"
+checksum = "64c54874f2f28f68243892c98b1dc1449cac775743ce4d9bce4245fa88964840"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -2,7 +2,7 @@ use rustradio::block::{Block, BlockRet};
 use rustradio::stream::{ReadStream, WriteStream, new_stream};
 use rustradio::{Error, Result};
 
-use crate::{WorkerToMain, worker::post_message};
+use crate::{WorkerToMain, worker::post_message, ReqData};
 
 // TODO: magic value.
 const PRODUCE_CHANNEL_SIZE: usize = 10;
@@ -49,11 +49,11 @@ impl WasmSource {
     }
     fn req_more(&mut self) -> Result<()> {
         if !self.outstanding_req {
-            post_message(WorkerToMain::ReqData(
-                crate::RECEIVER_SOURCE,
-                self.pos,
-                CHUNK_SIZE,
-            ))
+            post_message(WorkerToMain::ReqData(ReqData {
+                receiver: crate::RECEIVER_SOURCE,
+                pos: self.pos,
+                size: CHUNK_SIZE,
+            }))
             .map_err(|e| Error::msg(format!("{e:?}")))?;
             self.outstanding_req = true;
         }
@@ -82,6 +82,7 @@ impl Block for WasmSource {
     fn work(&mut self) -> Result<BlockRet<'_>> {
         loop {
             self.check_msgs();
+            log::trace!("WasmSource: buf len is {}", self.buf.len());
             if self.buf.is_empty() {
                 if self.eof {
                     return Ok(BlockRet::EOF);
