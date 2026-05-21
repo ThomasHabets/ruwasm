@@ -14,6 +14,18 @@
 * Waterfall sink.
 * Fix the crashing bug on large inputs.
 
+## Websocket
+
+You can run a websocket data provider on localhost, or somewhere that has a
+valid HTTPS cert. For `ws://`, only localhost will work, because of browser
+security boundaries.
+
+Simple proof of concept example included:
+
+```
+cargo run --bin ws_stdout -- cat some_file.c32
+```
+
 ## Useful links
 
 * <https://notes.brooklynzelenka.com/Blog/Notes-on-Writing-Wasm>
