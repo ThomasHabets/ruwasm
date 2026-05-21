@@ -7,7 +7,7 @@ use rustradio::blocks::*;
 use rustradio::graph::GraphRunner;
 use rustradio::stream::ReadStream;
 
-use log::{error, info, trace};
+use log::{debug, error, info, trace};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
@@ -40,6 +40,7 @@ async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
     let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
     match event.data().try_into()? {
         MainToWorker::Start { samp_rate } => {
+            debug!("Got MainToWorker::Start");
             // Run the decoder.
             let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
             let o = radio_1200(samp_rate).await?;
@@ -69,6 +70,7 @@ async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
                         .expect("Worker failed to send bump to graph");
                 });
             });
+            trace!("Worker data message processing done");
         }
         MainToWorker::Eof(id) => {
             info!("Worker: Got EOF on {id:?}");
