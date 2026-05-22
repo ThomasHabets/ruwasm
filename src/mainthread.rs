@@ -208,7 +208,7 @@ fn mark_websocket_eof() -> Result<(), JsValue> {
 async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
     match e.data().try_into()? {
         WorkerToMain::ReqData(req) => {
-            info!("Main: received WorkerToMain::ReqData");
+            debug!("Main: received WorkerToMain::ReqData");
             handle_data_request(req).await?;
         }
         WorkerToMain::Ready => {
@@ -225,7 +225,7 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
         WorkerToMain::FloatStreams(streams) => {
             let lens: Vec<_> = streams.iter().map(|s| s.samples.len()).collect();
             let n = lens[0].min(10);
-            info!(
+            debug!(
                 "Main: received {} float stream(s) lens {lens:?}. A few samples: {:?}",
                 streams.len(),
                 &streams[0].samples[..n]

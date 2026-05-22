@@ -53,6 +53,6 @@ pub fn init_logging() -> Result<(), log::SetLoggerError> {
     };
 
     log::set_logger(&LOGGER)?;
-    log::set_max_level(LevelFilter::Debug);
+    log::set_max_level(LevelFilter::Info);
     Ok(())
 }

@@ -215,6 +215,10 @@ async fn radio_1200(samp_rate: u64, rtlsdr: bool) -> rustradio::Result<String> {
         BinarySlicer::new(prev),
         NrziDecode::new(prev),
         HdlcDeframer::new(prev, 10, 1500),
+        NCMap::new(prev, "log_packet", |x, tags| {
+            info!("Decoded packet! {x:?}");
+            vec![(x, tags)]
+        }),
     ];
 
     let (tx, rx) = async_channel::bounded(SOURCE_CHANNEL_SIZE);
@@ -256,6 +260,7 @@ fn add_complex_mag_tap(
     let samp_rate = 50_000;
     let samp_rate_2 = 1_000; // TODO: if you change this, change the time
     // sink value in mainthread.rs too.
+    // and also in time_sink for max number of samples.
     let (tee, src, prev) = Tee::new(src);
     let prev = blockchain![
         g,
@@ -324,6 +329,10 @@ async fn radio_wrap_9600(iq: bool) -> rustradio::Result<String> {
         NrziDecode::new(prev),
         Descrambler::g3ruh(prev),
         HdlcDeframer::new(prev, 10, 1500),
+        NCMap::new(prev, "log_packet", |x, tags| {
+            info!("Decoded packet! {x:?}");
+            vec![(x, tags)]
+        }),
     ];
 
     info!("Running graph");

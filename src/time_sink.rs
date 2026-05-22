@@ -9,7 +9,7 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 
-use log::info;
+use log::debug;
 use wasm_bindgen::prelude::*;
 use web_sys::{
     CanvasRenderingContext2d, Event, HtmlButtonElement, HtmlCanvasElement, HtmlInputElement,
@@ -26,7 +26,8 @@ const ID_GRAPH_Y_ZOOM_IN: &str = "graph-y-zoom-in";
 const ID_GRAPH_Y_ZOOM_OUT: &str = "graph-y-zoom-out";
 const ID_GRAPH_Y_AUTO: &str = "graph-y-auto";
 
-const MAX_GRAPH_POINTS: usize = 500_000;
+// TODO: make this settable.
+const MAX_GRAPH_POINTS: usize = 10_000;
 const AXIS_MARGIN_LEFT: f64 = 56.0;
 const AXIS_MARGIN_RIGHT: f64 = 12.0;
 const AXIS_MARGIN_TOP: f64 = 12.0;
@@ -271,7 +272,7 @@ fn draw_graph() -> Result<(), JsValue> {
         let state = opt.get_or_insert_with(GraphState::new);
         if state.auto_scale {
             if let Some((min, max)) = data_range(state) {
-                info!("Data range: {min} {max}");
+                debug!("Data range: {min} {max}");
                 state.y_min = min;
                 state.y_max = max;
             }
