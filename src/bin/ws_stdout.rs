@@ -1,11 +1,17 @@
-//! ws_stdout: Run a websocket server that when connected on, streams the stdout
+//! `ws_stdout`: Run a websocket server that when connected on, streams the stdout
 //! from a command to the websocket client.
 //!
 //! This is just a proof of concept while the actual protocol gets designed in
-//! DATA_STREAM.md.
+//! `DATA_STREAM.md`.
 //!
 //! This code is mostly vibe coded, implementing websocket stuff without
 //! dependencies. Kudos to LLM, but not something to rely on.
+#![allow(clippy::many_single_char_names)]
+#![allow(clippy::unreadable_literal)]
+#![allow(clippy::needless_pass_by_value)]
+#![allow(clippy::single_match_else)]
+#![allow(clippy::format_collect)]
+#![allow(clippy::cast_possible_truncation)]
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
@@ -405,11 +411,11 @@ fn read_client_frame(stream: &mut TcpStream) -> io::Result<ClientFrame> {
     }
 
     let len = match header[1] & 0x7F {
-        len @ 0..=125 => len as u64,
+        len @ 0..=125 => u64::from(len),
         126 => {
             let mut buf = [0u8; 2];
             stream.read_exact(&mut buf)?;
-            u16::from_be_bytes(buf) as u64
+            u64::from(u16::from_be_bytes(buf))
         }
         127 => {
             let mut buf = [0u8; 8];

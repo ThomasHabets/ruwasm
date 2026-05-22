@@ -92,12 +92,11 @@ impl GraphState {
     fn append_streams(&mut self, streams: &[FloatStream]) {
         for stream in streams {
             let idx = self.series.iter().position(|s| s.name == stream.name);
-            let series = match idx {
-                Some(i) => &mut self.series[i],
-                None => {
-                    self.series.push(GraphSeries::new(stream.name.clone()));
-                    self.series.last_mut().expect("series just added")
-                }
+            let series = if let Some(i) = idx {
+                &mut self.series[i]
+            } else {
+                self.series.push(GraphSeries::new(stream.name.clone()));
+                self.series.last_mut().expect("series just added")
             };
             series.append_samples(&stream.samples);
         }
@@ -233,8 +232,8 @@ fn time_range(state: &GraphState) -> Option<(f64, f64)> {
 fn resize_canvas_to_display_size(canvas: &HtmlCanvasElement) -> Result<(f64, f64), JsValue> {
     let window = web_sys::window().ok_or(JsValue::from_str("no window"))?;
     let dpr = window.device_pixel_ratio();
-    let display_width = canvas.client_width() as f64;
-    let display_height = canvas.client_height() as f64;
+    let display_width = f64::from(canvas.client_width());
+    let display_height = f64::from(canvas.client_height());
     if display_width > 0.0 && display_height > 0.0 {
         let width = (display_width * dpr).round().max(1.0) as u32;
         let height = (display_height * dpr).round().max(1.0) as u32;
@@ -243,7 +242,7 @@ fn resize_canvas_to_display_size(canvas: &HtmlCanvasElement) -> Result<(f64, f64
             canvas.set_height(height);
         }
     }
-    Ok((canvas.width() as f64, canvas.height() as f64))
+    Ok((f64::from(canvas.width()), f64::from(canvas.height())))
 }
 
 fn draw_graph() -> Result<(), JsValue> {
@@ -257,8 +256,7 @@ fn draw_graph() -> Result<(), JsValue> {
     let window = web_sys::window().ok_or(JsValue::from_str("no window"))?;
     let is_dark = window
         .match_media("(prefers-color-scheme: dark)")?
-        .map(|m| m.matches())
-        .unwrap_or(false);
+        .is_some_and(|m| m.matches());
     let bg = if is_dark { "#0b0b0b" } else { "#ffffff" };
     let axis = if is_dark { "#666" } else { "#888" };
     let text = if is_dark { "#ddd" } else { "#222" };
@@ -318,12 +316,12 @@ fn draw_graph() -> Result<(), JsValue> {
             plot_height,
             x_min,
             x_max,
-            y_min as f64,
-            y_max as f64,
+            f64::from(y_min),
+            f64::from(y_max),
         )?;
 
         let x_range = (x_max - x_min).max(1e-9);
-        let y_range = (y_max - y_min) as f64;
+        let y_range = f64::from(y_max - y_min);
         let colors = ["#2b8cbe", "#31a354", "#756bb1", "#e6550d"];
 
         for (idx, series) in state.series.iter().enumerate() {
@@ -344,12 +342,12 @@ fn draw_graph() -> Result<(), JsValue> {
                 let t = sample_idx as f64 / state.sample_rate;
                 let x = plot_left + ((t - x_min) / x_range) * plot_width;
                 let y = plot_top + plot_height
-                    - ((*sample as f64 - y_min as f64) / y_range) * plot_height;
-                if !started {
+                    - ((f64::from(*sample) - f64::from(y_min)) / y_range) * plot_height;
+                if started {
+                    ctx.line_to(x, y);
+                } else {
                     ctx.move_to(x, y);
                     started = true;
-                } else {
-                    ctx.line_to(x, y);
                 }
             }
             ctx.stroke();
@@ -494,7 +492,7 @@ fn zoom_y(factor: f32) -> Result<(), JsValue> {
             y_min = -1.0;
             y_max = 1.0;
         }
-        let center = (y_min + y_max) / 2.0;
+        let center = f32::midpoint(y_min, y_max);
         let half = ((y_max - y_min) / 2.0 * factor).max(1e-6);
         state.y_min = center - half;
         state.y_max = center + half;
@@ -521,6 +519,7 @@ fn parse_f32_input(id: &str) -> Result<f32, JsValue> {
         .map_err(|e| JsValue::from_str(&format!("parsing {id}: {e}")))
 }
 
+#[allow(clippy::needless_pass_by_value)]
 pub(crate) fn update(streams: Vec<FloatStream>) -> Result<(), JsValue> {
     with_graph_state(|state| state.append_streams(&streams));
     draw_graph()

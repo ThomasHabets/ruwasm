@@ -1,3 +1,10 @@
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+// TODO: fix some of the above
 use log::info;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -145,19 +152,25 @@ pub async fn start() -> Result<(), JsValue> {
 
 /// Get a descriptive git string for the current code.
 #[wasm_bindgen]
+#[must_use]
 pub fn git_version() -> String {
     rustradio::sys::initialize_rustradio();
     info!("git_version() called");
+
+    // Wat? What's wrong with clippy?
+    #[allow(clippy::manual_string_new)]
     env!("GIT_VERSION").to_string()
 }
 
 /// Get the version of the Rust compiler that built this.
 #[wasm_bindgen]
+#[must_use]
 pub fn rustc_version() -> String {
     env!("RUSTC_VERSION").to_string()
 }
 
 #[wasm_bindgen]
+#[must_use]
 pub fn add(a: i32, b: i32) -> String {
     info!("Hello world, adding {a} and {b}");
     format!("Add results: {}", a + b)
@@ -174,4 +187,5 @@ pub(crate) fn uint8array_to_vec(arr: &Uint8Array) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    // TODO: add some tests.
 }

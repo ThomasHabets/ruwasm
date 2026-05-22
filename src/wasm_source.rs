@@ -61,6 +61,7 @@ impl WasmSource {
     }
     fn check_msgs(&mut self) {
         loop {
+            #[allow(clippy::match_same_arms)]
             match self.rx.try_recv() {
                 Err(async_channel::TryRecvError::Empty) => break,
                 Err(async_channel::TryRecvError::Closed) => break,
@@ -86,10 +87,9 @@ impl Block for WasmSource {
             if self.buf.is_empty() {
                 if self.eof {
                     return Ok(BlockRet::EOF);
-                } else {
-                    self.req_more()?;
-                    return Ok(BlockRet::Pending);
                 }
+                self.req_more()?;
+                return Ok(BlockRet::Pending);
             }
             let mut o = self.dst.write_buf()?;
             if o.is_empty() {

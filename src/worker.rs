@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use rustradio::blockchain;
+#[allow(clippy::wildcard_imports)]
 use rustradio::blocks::*;
 use rustradio::graph::GraphRunner;
 use rustradio::stream::ReadStream;
@@ -102,6 +103,7 @@ async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
 }
 
 /// Main entry point into the worker.
+#[allow(clippy::unused_async)]
 pub(crate) async fn setup() -> Result<(), JsValue> {
     info!("Setting up worker");
 
@@ -253,7 +255,7 @@ fn add_complex_mag_tap(
 ) -> rustradio::Result<ReadStream<rustradio::Complex>> {
     let samp_rate = 50_000;
     let samp_rate_2 = 1_000; // TODO: if you change this, change the time
-                                    // sink value in mainthread.rs too.
+    // sink value in mainthread.rs too.
     let (tee, src, prev) = Tee::new(src);
     let prev = blockchain![
         g,
@@ -272,6 +274,7 @@ fn add_complex_mag_tap(
 
 // TODO: add support for 9600
 #[allow(unused)]
+#[allow(clippy::unused_async)]
 async fn radio_wrap_9600(iq: bool) -> rustradio::Result<String> {
     info!("AX.25 9600 decode");
     let samp_rate = 50_000.0;

@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::js_sys;
@@ -143,11 +143,11 @@ fn input_source() -> InputSource {
 fn select_input_source(source: InputSource) -> Result<(), JsValue> {
     INPUT_SOURCE.with(|slot| {
         let mut active = slot.borrow_mut();
-        if *active != InputSource::None {
-            Err(JsValue::from_str("input source already selected"))
-        } else {
+        if *active == InputSource::None {
             *active = source;
             Ok(())
+        } else {
+            Err(JsValue::from_str("input source already selected"))
         }
     })
 }
@@ -250,6 +250,7 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
 /// Handle receiving a message from the worker saying it's ready.
 ///
 /// This means we should enable UI controls.
+#[allow(clippy::unused_async)]
 async fn worker_msg_ready() -> Result<(), JsValue> {
     // Set up Add button.
     {
@@ -418,6 +419,7 @@ fn set_content(id: &str, content: &str) -> Result<(), JsValue> {
     Ok(())
 }
 
+#[allow(clippy::unused_async)]
 pub(crate) async fn setup() -> Result<(), JsValue> {
     {
         let wgit = crate::git_version();
@@ -444,9 +446,9 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
     set_content(
         ID_RESULT,
         &format!(
-            r#"<b>WASM loaded</b>
+            r"<b>WASM loaded</b>
 WASM code version: {}
-WASM built by Rust version: {}"#,
+WASM built by Rust version: {}",
             crate::git_version(),
             crate::rustc_version()
         ),
@@ -533,16 +535,13 @@ fn connect_websocket(url: &str) -> Result<(), JsValue> {
     {
         let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
             match websocket_message_bytes(event.data()) {
-                Ok(Some(data)) => {
+                Some(data) => {
                     if let Err(e) = queue_websocket_data(data) {
                         error!("Main: failed to queue websocket input: {e:?}");
                     }
                 }
-                Ok(None) => {
-                    info!("Main: ignoring websocket message with unsupported payload type");
-                }
-                Err(e) => {
-                    error!("Main: failed to read websocket message: {e:?}");
+                None => {
+                    warn!("Main: ignoring websocket message with unsupported payload type");
                 }
             }
         });
@@ -582,14 +581,15 @@ fn connect_websocket(url: &str) -> Result<(), JsValue> {
 
 /// Normalize supported WebSocket payload shapes into byte chunks so binary and
 /// text senders can both feed the receiver block.
-fn websocket_message_bytes(data: JsValue) -> Result<Option<Vec<u8>>, JsValue> {
+#[allow(clippy::needless_pass_by_value)]
+fn websocket_message_bytes(data: JsValue) -> Option<Vec<u8>> {
     if let Ok(buf) = data.clone().dyn_into::<js_sys::ArrayBuffer>() {
-        return Ok(Some(Uint8Array::new(&buf).to_vec()));
+        return Some(Uint8Array::new(&buf).to_vec());
     }
     if let Ok(bytes) = data.clone().dyn_into::<Uint8Array>() {
-        return Ok(Some(bytes.to_vec()));
+        return Some(bytes.to_vec());
     }
-    Ok(data.as_string().map(String::into_bytes))
+    data.as_string().map(String::into_bytes)
 }
 
 /// Freeze input-picking controls after one source wins, mirroring the
