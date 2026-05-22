@@ -13,9 +13,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use clap::Parser;
-use anyhow::Result;
 use anyhow::Context;
+use anyhow::Result;
+use clap::Parser;
 
 const MAX_HTTP_HEADER_BYTES: usize = 64 * 1024;
 const WEBSOCKET_MAGIC: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -25,7 +25,7 @@ const WEBSOCKET_MAGIC: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 #[clap(about, version)]
 struct Opt {
     /// Listen address.
-    #[arg(long, short, default_value="localhost:8080")]
+    #[arg(long, short, default_value = "localhost:8080")]
     listen: String,
 
     /// Command to run and read stdout from.
@@ -45,7 +45,8 @@ struct ClientFrame {
 fn main() -> Result<()> {
     let opt = Arc::new(Opt::parse());
 
-    let listener = TcpListener::bind(&opt.listen).context(format!("failed to bind to {}", opt.listen))?;
+    let listener =
+        TcpListener::bind(&opt.listen).context(format!("failed to bind to {}", opt.listen))?;
 
     if opt.command.is_empty() {
         return Err(anyhow::anyhow!("missing command"));
@@ -183,33 +184,35 @@ fn spawn_disconnect_monitor(
     child: Arc<Mutex<Child>>,
     disconnected: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
-    thread::spawn(move || loop {
-        match read_client_frame(&mut stream) {
-            Ok(frame) => match frame.opcode {
-                0x8 => {
+    thread::spawn(move || {
+        loop {
+            match read_client_frame(&mut stream) {
+                Ok(frame) => match frame.opcode {
+                    0x8 => {
+                        disconnected.store(true, Ordering::SeqCst);
+                        terminate_child(&child);
+                        let mut writer = writer.lock().unwrap();
+                        let _ = write_ws_frame(&mut writer, 0x8, &frame.payload);
+                        let _ = writer.shutdown(Shutdown::Both);
+                        break;
+                    }
+                    0x9 => {
+                        let mut writer = writer.lock().unwrap();
+                        if write_ws_frame(&mut writer, 0xA, &frame.payload).is_err() {
+                            disconnected.store(true, Ordering::SeqCst);
+                            terminate_child(&child);
+                            break;
+                        }
+                    }
+                    _ => {}
+                },
+                Err(_) => {
                     disconnected.store(true, Ordering::SeqCst);
                     terminate_child(&child);
-                    let mut writer = writer.lock().unwrap();
-                    let _ = write_ws_frame(&mut writer, 0x8, &frame.payload);
+                    let writer = writer.lock().unwrap();
                     let _ = writer.shutdown(Shutdown::Both);
                     break;
                 }
-                0x9 => {
-                    let mut writer = writer.lock().unwrap();
-                    if write_ws_frame(&mut writer, 0xA, &frame.payload).is_err() {
-                        disconnected.store(true, Ordering::SeqCst);
-                        terminate_child(&child);
-                        break;
-                    }
-                }
-                _ => {}
-            },
-            Err(_) => {
-                disconnected.store(true, Ordering::SeqCst);
-                terminate_child(&child);
-                let writer = writer.lock().unwrap();
-                let _ = writer.shutdown(Shutdown::Both);
-                break;
             }
         }
     })
