@@ -26,6 +26,19 @@ Simple proof of concept example included:
 cargo run --bin ws_stdout -- cat some_file.c32
 ```
 
+### Websocket live stream
+
+It's not keeping up with real time, and delays instead of drops data (TODO), but
+you can stream directly from RTL-SDR using a rustradio example binary
+`rtl_downsampled` (without downsampling it works even worse, since the minimum
+data rate from an RTL-SDR dongle is 200k+ sps).
+
+```
+cargo run --bin ws_stdout -- -- .../path/to/rtl_downsampled --freq 144750000
+```
+
+Don't forget to tick the RTL-SDR format checkbox in the UI.
+
 ## Websocket
 
 You can run a websocket data provider on localhost, or somewhere that has a
