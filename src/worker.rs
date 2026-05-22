@@ -43,7 +43,7 @@ async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
             debug!("Got MainToWorker::Start");
             // Run the decoder.
             let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
-            let o = radio_1200(samp_rate).await?;
+            let o = radio_1200(samp_rate, true).await?;
             scope
                 .post_message(
                     &WorkerToMain::Result(o)
@@ -142,7 +142,7 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
 ///
 /// The input comes in via GraphComms into the WasmSource block, so this
 /// function doesn't return until an EOF has come in.
-async fn radio_1200(samp_rate: u64) -> rustradio::Result<String> {
+async fn radio_1200(samp_rate: u64, iq: bool) -> rustradio::Result<String> {
     info!("AX.25 1200 decoder running");
 
     // Decoder parameters.
@@ -161,11 +161,16 @@ async fn radio_1200(samp_rate: u64) -> rustradio::Result<String> {
     let (src, prev, src_tx) = crate::wasm_source::WasmSource::new();
     g.add(Box::new(src));
 
+    let prev = if iq {
+        blockchain![g, prev, Parse::new(prev)]
+    } else {
+        blockchain![g, prev, RtlSdrDecode::new(prev)]
+    };
+
     // Set up rest of decoder graph.
     let prev = blockchain![
         g,
         prev,
-        Parse::new(prev),
         FftFilter::new(
             prev,
             rustradio::fir::low_pass_complex(
@@ -245,19 +250,28 @@ fn add_complex_mag_tap(
     g: &mut crate::wasm_graph::WasmGraph,
     name: impl Into<String>,
     src: ReadStream<rustradio::Complex>,
-) -> ReadStream<rustradio::Complex> {
-    let (tee, src, tap_src) = Tee::new(src);
-    let (mag, tap_src) = ComplexToMag2::new(tap_src);
-    let sink = crate::float_sink::FloatSink::new(tap_src, name.into());
+) -> rustradio::Result<ReadStream<rustradio::Complex>> {
+    let samp_rate = 50_000;
+    let samp_rate_2 = 1_000;
+    let (tee, src, prev) = Tee::new(src);
+    let prev = blockchain![
+        g,
+        prev,
+        RationalResampler::builder()
+            .deci(samp_rate)
+            .interp(samp_rate_2)
+            .build(prev)?,
+        ComplexToMag2::new(prev)
+    ];
+    let sink = crate::float_sink::FloatSink::new(prev, name.into());
     g.add(Box::new(tee));
-    g.add(Box::new(mag));
     g.add(Box::new(sink));
-    src
+    Ok(src)
 }
 
 // TODO: add support for 9600
 #[allow(unused)]
-async fn radio_wrap_9600() -> rustradio::Result<String> {
+async fn radio_wrap_9600(iq: bool) -> rustradio::Result<String> {
     info!("AX.25 9600 decode");
     let samp_rate = 50_000.0;
     let if_rate = 50_000.0;
@@ -271,10 +285,15 @@ async fn radio_wrap_9600() -> rustradio::Result<String> {
     let (src, prev, src_tx) = crate::wasm_source::WasmSource::new();
     g.add(Box::new(src));
 
+    let prev = if iq {
+        blockchain![g, prev, Parse::new(prev)]
+    } else {
+        blockchain![g, prev, RtlSdrDecode::new(prev)]
+    };
+
     let prev = blockchain![
         g,
         prev,
-        Parse::new(prev),
         FftFilter::new(
             prev,
             rustradio::fir::low_pass_complex(
