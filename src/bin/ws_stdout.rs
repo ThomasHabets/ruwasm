@@ -20,6 +20,15 @@ use clap::Parser;
 const MAX_HTTP_HEADER_BYTES: usize = 64 * 1024;
 const WEBSOCKET_MAGIC: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, clap::ValueEnum)]
+pub enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
 /// Websocket server for stdout output streaming.
 #[derive(Parser)]
 #[clap(about, version)]
@@ -27,6 +36,10 @@ struct Opt {
     /// Listen address.
     #[arg(long, short, default_value = "localhost:8080")]
     listen: String,
+
+    /// Verbosity level.
+    #[clap(short = 'v', default_value = "info")]
+    verbose: LogLevel,
 
     /// Command to run and read stdout from.
     command: Vec<String>,
@@ -44,6 +57,14 @@ struct ClientFrame {
 
 fn main() -> Result<()> {
     let opt = Arc::new(Opt::parse());
+
+    stderrlog::new()
+        .module(module_path!())
+        .module("rustradio")
+        .quiet(false)
+        .verbosity(opt.verbose as usize)
+        .timestamp(stderrlog::Timestamp::Second)
+        .init()?;
 
     let listener =
         TcpListener::bind(&opt.listen).context(format!("failed to bind to {}", opt.listen))?;
