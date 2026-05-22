@@ -1,4 +1,4 @@
-use log::{trace, info};
+use log::{info, trace};
 
 //use futures::channel::mpsc;
 //use futures::StreamExt;

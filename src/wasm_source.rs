@@ -2,7 +2,7 @@ use rustradio::block::{Block, BlockRet};
 use rustradio::stream::{ReadStream, WriteStream, new_stream};
 use rustradio::{Error, Result};
 
-use crate::{WorkerToMain, worker::post_message, ReqData};
+use crate::{ReqData, WorkerToMain, worker::post_message};
 
 // TODO: magic value.
 const PRODUCE_CHANNEL_SIZE: usize = 10;

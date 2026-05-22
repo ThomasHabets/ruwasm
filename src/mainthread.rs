@@ -16,9 +16,9 @@ use web_sys::{
 
 use crate::FloatStream;
 use crate::RECEIVER_SOURCE;
-use crate::{ReqData, ReceiverId};
 use crate::js_performance_now;
 use crate::{MainToWorker, WorkerToMain};
+use crate::{ReceiverId, ReqData};
 
 const HTML_DISABLED: &str = "disabled";
 const ID_RESULT: &str = "result";
@@ -222,7 +222,13 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
             log::log!(level, "[worker] {line}");
         }
         WorkerToMain::FloatStreams(streams) => {
-            info!("Main: received {} float stream(s)", streams.len());
+            let lens: Vec<_> = streams.iter().map(|s| s.samples.len()).collect();
+            let n = lens[0].min(10);
+            info!(
+                "Main: received {} float stream(s) lens {lens:?}. A few samples: {:?}",
+                streams.len(),
+                &streams[0].samples[..n]
+            );
             for (n, s) in streams.iter().enumerate() {
                 debug!("Stream {n} name {}", s.name);
             }
