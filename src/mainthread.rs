@@ -287,7 +287,8 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
             let rtlsdr = get_element(ID_RTLSDR_FORMAT)?
                 .dyn_into::<web_sys::HtmlInputElement>()?
                 .checked();
-            crate::time_sink::set_sample_rate(samp_rate as f64);
+            // TODO: hard coded here.
+            crate::time_sink::set_sample_rate(1000.0);
             post_message(MainToWorker::Start { samp_rate, rtlsdr })?;
             get_element(ID_FILE_INPUT)?
                 .dyn_into::<HtmlInputElement>()?

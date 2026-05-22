@@ -252,7 +252,8 @@ fn add_complex_mag_tap(
     src: ReadStream<rustradio::Complex>,
 ) -> rustradio::Result<ReadStream<rustradio::Complex>> {
     let samp_rate = 50_000;
-    let samp_rate_2 = 1_000;
+    let samp_rate_2 = 1_000; // TODO: if you change this, change the time
+                                    // sink value in mainthread.rs too.
     let (tee, src, prev) = Tee::new(src);
     let prev = blockchain![
         g,
