@@ -186,7 +186,7 @@ async fn radio_1200(samp_rate: u64, iq: bool) -> rustradio::Result<String> {
             .build(prev)
             .map_err(|e| rustradio::Error::wrap(e, "rational resampler"))?,
     ];
-    let prev = add_complex_mag_tap(&mut g, "iq_mag", prev);
+    let prev = add_complex_mag_tap(&mut g, "iq_mag", prev)?;
     let prev = blockchain![
         g,
         prev,
