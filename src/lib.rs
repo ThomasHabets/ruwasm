@@ -33,8 +33,8 @@ pub struct FloatStream {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 enum MainToWorker {
-    /// Start the graph.
-    Start { samp_rate: u64 },
+    /// Start the graph with the selected input byte format.
+    Start { samp_rate: u64, rtlsdr: bool },
 
     /// Data going to a WasmSource or something.
     Data(ReceiverId, Vec<u8>),

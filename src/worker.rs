@@ -39,11 +39,11 @@ pub(crate) fn post_message(msg: WorkerToMain) -> Result<(), JsValue> {
 async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
     let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
     match event.data().try_into()? {
-        MainToWorker::Start { samp_rate } => {
+        MainToWorker::Start { samp_rate, rtlsdr } => {
             debug!("Got MainToWorker::Start");
             // Run the decoder.
             let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
-            let o = radio_1200(samp_rate, true).await?;
+            let o = radio_1200(samp_rate, rtlsdr).await?;
             scope
                 .post_message(
                     &WorkerToMain::Result(o)
@@ -142,7 +142,7 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
 ///
 /// The input comes in via GraphComms into the WasmSource block, so this
 /// function doesn't return until an EOF has come in.
-async fn radio_1200(samp_rate: u64, iq: bool) -> rustradio::Result<String> {
+async fn radio_1200(samp_rate: u64, rtlsdr: bool) -> rustradio::Result<String> {
     info!("AX.25 1200 decoder running");
 
     // Decoder parameters.
@@ -161,10 +161,10 @@ async fn radio_1200(samp_rate: u64, iq: bool) -> rustradio::Result<String> {
     let (src, prev, src_tx) = crate::wasm_source::WasmSource::new();
     g.add(Box::new(src));
 
-    let prev = if iq {
-        blockchain![g, prev, Parse::new(prev)]
-    } else {
+    let prev = if rtlsdr {
         blockchain![g, prev, RtlSdrDecode::new(prev)]
+    } else {
+        blockchain![g, prev, Parse::new(prev)]
     };
 
     // Set up rest of decoder graph.

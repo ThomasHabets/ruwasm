@@ -24,6 +24,7 @@ const HTML_DISABLED: &str = "disabled";
 const ID_RESULT: &str = "result";
 const ID_START: &str = "btn-start";
 const ID_SAMP_RATE: &str = "input-samp-rate";
+const ID_RTLSDR_FORMAT: &str = "input-rtlsdr-format";
 const ID_FILE_INPUT: &str = "fileInput";
 const ID_WS_URL: &str = "input-ws-url";
 const ID_WS_CONNECT: &str = "btn-ws-connect";
@@ -283,8 +284,11 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
                 .value()
                 .parse()
                 .map_err(|e| JsValue::from_str(&format!("parsing sample rate: {e}")))?;
+            let rtlsdr = get_element(ID_RTLSDR_FORMAT)?
+                .dyn_into::<web_sys::HtmlInputElement>()?
+                .checked();
             crate::time_sink::set_sample_rate(samp_rate as f64);
-            post_message(MainToWorker::Start { samp_rate })?;
+            post_message(MainToWorker::Start { samp_rate, rtlsdr })?;
             get_element(ID_FILE_INPUT)?
                 .dyn_into::<HtmlInputElement>()?
                 .set_disabled(false);
@@ -298,6 +302,9 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
                 .dyn_into::<web_sys::HtmlButtonElement>()?
                 .set_disabled(true);
             get_element(ID_SAMP_RATE)?
+                .dyn_into::<web_sys::HtmlInputElement>()?
+                .set_disabled(true);
+            get_element(ID_RTLSDR_FORMAT)?
                 .dyn_into::<web_sys::HtmlInputElement>()?
                 .set_disabled(true);
             Ok(())
