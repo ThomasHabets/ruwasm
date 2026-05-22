@@ -8,11 +8,8 @@
 ## TODO
 
 * Send the shape of the graph for graphviz-like rendering.
-* Send log lines to a text box.
-* Send decodes to a text box too.
 * Make most of time sink in HTML templated instead of assuming HTML has it.
 * Waterfall sink.
-* Fix the crashing bug on large inputs.
 
 ## Websocket
 
