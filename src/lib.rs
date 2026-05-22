@@ -174,5 +174,4 @@ pub(crate) fn uint8array_to_vec(arr: &Uint8Array) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 }
