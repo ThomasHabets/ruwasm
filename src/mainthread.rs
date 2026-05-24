@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use log::{debug, error, info, warn};
+use rustradio::data_stream::{BytesReader, DataStreamId, PROTOCOL_VERSION, Packet, SyncWriter};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::js_sys;
@@ -31,6 +32,9 @@ const ID_WS_CONNECT: &str = "btn-ws-connect";
 const ID_ADD: &str = "btn-add";
 const ID_PING: &str = "btn-ping";
 const ID_HTML: &str = "root-html";
+const WS_STREAM_ID: &str = "rtl-sdr";
+const WS_WINDOW_BYTES: usize = 64 * 1024;
+const WS_MAX_PACKET_LEN: usize = WS_WINDOW_BYTES + 4096;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum InputSource {
@@ -39,8 +43,16 @@ enum InputSource {
     WebSocket,
 }
 
+// The chunkiness makes for less copying.
+//
+// TODO: But a better solution would be to be to borrow the data, and let it be
+// borrowed until serialized and sent by post_message. That way we're not
+// restricted by the chunkiness of the websocket incoming data.
 struct WebSocketSourceState {
     chunks: VecDeque<Vec<u8>>,
+    queued_bytes: usize,
+    reader: BytesReader,
+    peer_version_seen: bool,
     eof: bool,
 }
 
@@ -50,6 +62,9 @@ impl WebSocketSourceState {
     fn new() -> Self {
         Self {
             chunks: VecDeque::new(),
+            queued_bytes: 0,
+            reader: BytesReader::new().with_max_packet_len(WS_MAX_PACKET_LEN),
+            peer_version_seen: false,
             eof: false,
         }
     }
@@ -107,6 +122,7 @@ fn satisfy_websocket_request(req: ReqData) -> Result<(), JsValue> {
     let msg = WS_SOURCE_STATE.with(|slot| {
         let mut state = slot.borrow_mut();
         if let Some(data) = state.chunks.pop_front() {
+            state.queued_bytes = state.queued_bytes.saturating_sub(data.len());
             Some(MainToWorker::Data(req.receiver, data))
         } else if state.eof {
             Some(MainToWorker::Eof(req.receiver))
@@ -118,6 +134,7 @@ fn satisfy_websocket_request(req: ReqData) -> Result<(), JsValue> {
     if let Some(msg) = msg {
         post_message(msg)?;
     }
+    refresh_websocket_window()?;
     Ok(())
 }
 
@@ -185,13 +202,29 @@ fn queue_websocket_data(data: Vec<u8>) -> Result<(), JsValue> {
     if input_source() != InputSource::WebSocket {
         return Ok(());
     }
+    if data.len() > WS_WINDOW_BYTES {
+        return Err(JsValue::from_str(
+            "websocket input packet exceeded receive window",
+        ));
+    }
 
     if let Some(req) = take_pending_request() {
-        send_data_or_eof(req.receiver, data)
+        send_data_or_eof(req.receiver, data)?;
     } else {
-        WS_SOURCE_STATE.with(|slot| slot.borrow_mut().chunks.push_back(data));
-        Ok(())
+        WS_SOURCE_STATE.with(|slot| {
+            let mut state = slot.borrow_mut();
+            state.queued_bytes = state
+                .queued_bytes
+                .checked_add(data.len())
+                .ok_or_else(|| JsValue::from_str("websocket input queue length overflow"))?;
+            if state.queued_bytes > WS_WINDOW_BYTES {
+                return Err(JsValue::from_str("websocket input exceeded receive window"));
+            }
+            state.chunks.push_back(data);
+            Ok(())
+        })?;
     }
+    Ok(())
 }
 
 /// Mark the WebSocket input complete and wake any parked request with EOF so
@@ -202,6 +235,166 @@ fn mark_websocket_eof() -> Result<(), JsValue> {
         post_message(MainToWorker::Eof(req.receiver))?;
     }
     Ok(())
+}
+
+/// Convert rustradio DATA_STREAM errors into JS errors with enough context to
+/// identify the WebSocket protocol layer.
+fn data_stream_error(err: impl std::fmt::Display) -> JsValue {
+    JsValue::from_str(&format!("DATA_STREAM websocket error: {err}"))
+}
+
+/// Return the protocol stream name ruwasm currently expects from WebSocket
+/// producers.
+fn websocket_stream_id() -> DataStreamId {
+    DataStreamId::new(WS_STREAM_ID)
+}
+
+/// Send one serialized DATA_STREAM packet over the browser WebSocket.
+fn websocket_send_bytes(data: &[u8]) -> Result<(), JsValue> {
+    WS_SOCKET.with(|slot| {
+        let ws = slot
+            .borrow()
+            .clone()
+            .ok_or_else(|| JsValue::from_str("websocket is not connected"))?;
+        ws.send_with_u8_array(data)
+    })
+}
+
+/// Start the DATA_STREAM handshake from the browser side once the WebSocket
+/// transport is open.
+fn websocket_write_version() -> Result<(), JsValue> {
+    let mut packet = Vec::new();
+    SyncWriter::new(&mut packet)
+        .write_version()
+        .map_err(data_stream_error)?;
+    websocket_send_bytes(&packet)
+}
+
+/// Advertise the current receive window to the WebSocket producer so it knows
+/// how many more bytes it may send.
+fn websocket_write_request_data(window: usize) -> Result<(), JsValue> {
+    if !websocket_peer_version_seen() {
+        return Ok(());
+    }
+
+    let mut packet = Vec::new();
+    let stream_id = websocket_stream_id();
+    SyncWriter::new(&mut packet)
+        .write_request_data(&stream_id, window)
+        .map_err(data_stream_error)?;
+    debug!("Main: requesting DATA_STREAM window {window} for {stream_id}");
+    websocket_send_bytes(&packet)
+}
+
+/// Track whether the peer has completed its side of the DATA_STREAM version
+/// handshake.
+fn websocket_peer_version_seen() -> bool {
+    WS_SOURCE_STATE.with(|slot| slot.borrow().peer_version_seen)
+}
+
+/// Compute remaining main-thread buffering capacity for DATA_STREAM flow
+/// control.
+fn websocket_available_window() -> usize {
+    WS_SOURCE_STATE.with(|slot| {
+        let state = slot.borrow();
+        WS_WINDOW_BYTES.saturating_sub(state.queued_bytes)
+    })
+}
+
+/// Re-publish the receive window after bytes move from the main-thread queue
+/// into the worker.
+fn refresh_websocket_window() -> Result<(), JsValue> {
+    if input_source() != InputSource::WebSocket {
+        return Ok(());
+    }
+    if WS_SOURCE_STATE.with(|slot| slot.borrow().eof) {
+        return Ok(());
+    }
+    websocket_write_request_data(websocket_available_window())
+}
+
+/// Push incoming WebSocket bytes into rustradio's chunk-oriented DATA_STREAM
+/// parser and drain all complete packets now available.
+fn append_websocket_protocol_bytes(data: &[u8]) -> Result<Vec<Packet>, JsValue> {
+    WS_SOURCE_STATE.with(|slot| {
+        let mut state = slot.borrow_mut();
+        state.reader.push_bytes(data);
+        let mut packets = Vec::new();
+
+        loop {
+            let Some(packet) = state.reader.read_packet().map_err(data_stream_error)? else {
+                break;
+            };
+            packets.push(packet);
+        }
+
+        Ok(packets)
+    })
+}
+
+/// Record that the peer version is accepted, update the UI, and issue the first
+/// receive window.
+fn mark_websocket_peer_version_seen() -> Result<(), JsValue> {
+    WS_SOURCE_STATE.with(|slot| slot.borrow_mut().peer_version_seen = true);
+    set_content(
+        ID_RESULT,
+        "WebSocket DATA_STREAM connected. Waiting for samples…",
+    )?;
+    refresh_websocket_window()
+}
+
+/// Apply a parsed DATA_STREAM packet to ruwasm's source state, accepting only
+/// the protocol messages expected from the producer.
+fn handle_websocket_protocol_packet(packet: Packet) -> Result<(), JsValue> {
+    match packet {
+        Packet::Version(PROTOCOL_VERSION) => {
+            info!("Main: DATA_STREAM websocket peer version accepted");
+            mark_websocket_peer_version_seen()
+        }
+        Packet::Version(version) => Err(data_stream_error(format!(
+            "unsupported protocol version {version}",
+        ))),
+        Packet::Data(data) => {
+            if data.stream_id.as_str() != WS_STREAM_ID {
+                return Err(data_stream_error(format!(
+                    "unexpected DATA_STREAM id {}, want {WS_STREAM_ID}",
+                    data.stream_id,
+                )));
+            }
+            queue_websocket_data(data.data)
+        }
+        Packet::RequestData(req) => Err(data_stream_error(format!(
+            "unexpected RequestData packet for {} with window {}",
+            req.stream_id, req.window,
+        ))),
+    }
+}
+
+/// Decode all complete DATA_STREAM packets carried by a WebSocket message and
+/// feed data packets into the worker-facing source queue.
+fn handle_websocket_protocol_bytes(data: Vec<u8>) -> Result<(), JsValue> {
+    if input_source() != InputSource::WebSocket {
+        return Ok(());
+    }
+    for packet in append_websocket_protocol_bytes(&data)? {
+        if !matches!(packet, Packet::Version(_)) && !websocket_peer_version_seen() {
+            return Err(data_stream_error("peer sent data before Version packet"));
+        }
+        handle_websocket_protocol_packet(packet)?;
+    }
+    Ok(())
+}
+
+/// Surface a protocol failure and close the WebSocket so the worker sees EOF
+/// through the normal close path.
+fn close_websocket_after_error(err: &JsValue) {
+    error!("Main: websocket DATA_STREAM error: {err:?}");
+    let _ = set_content(ID_RESULT, "WebSocket DATA_STREAM protocol error.");
+    WS_SOCKET.with(|slot| {
+        if let Some(ws) = slot.borrow().as_ref() {
+            let _ = ws.close();
+        }
+    });
 }
 
 /// Handle message sent from the worker.
@@ -521,12 +714,19 @@ fn start_websocket_source(url: &str) -> Result<(), JsValue> {
 fn connect_websocket(url: &str) -> Result<(), JsValue> {
     let ws = WebSocket::new(url)?;
     ws.set_binary_type(BinaryType::Arraybuffer);
+    WS_SOCKET.with(|slot| {
+        *slot.borrow_mut() = Some(ws.clone());
+    });
 
     {
         let url = url.to_string();
         let onopen = Closure::<dyn FnMut(Event)>::new(move |_event: Event| {
             info!("Main: websocket input connected to {url}");
-            let _ = set_content(ID_RESULT, "WebSocket input connected. Waiting for samples…");
+            if let Err(e) = websocket_write_version() {
+                close_websocket_after_error(&e);
+            } else {
+                let _ = set_content(ID_RESULT, "WebSocket connected. Negotiating DATA_STREAM…");
+            }
         });
         ws.set_onopen(Some(onopen.as_ref().unchecked_ref()));
         onopen.forget();
@@ -536,12 +736,14 @@ fn connect_websocket(url: &str) -> Result<(), JsValue> {
         let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
             match websocket_message_bytes(event.data()) {
                 Some(data) => {
-                    if let Err(e) = queue_websocket_data(data) {
-                        error!("Main: failed to queue websocket input: {e:?}");
+                    if let Err(e) = handle_websocket_protocol_bytes(data) {
+                        close_websocket_after_error(&e);
                     }
                 }
                 None => {
-                    warn!("Main: ignoring websocket message with unsupported payload type");
+                    warn!(
+                        "Main: ignoring DATA_STREAM websocket message with unsupported payload type"
+                    );
                 }
             }
         });
@@ -573,14 +775,10 @@ fn connect_websocket(url: &str) -> Result<(), JsValue> {
         onclose.forget();
     }
 
-    WS_SOCKET.with(|slot| {
-        *slot.borrow_mut() = Some(ws);
-    });
     Ok(())
 }
 
-/// Normalize supported WebSocket payload shapes into byte chunks so binary and
-/// text senders can both feed the receiver block.
+/// Normalize supported WebSocket payload shapes into protocol bytes.
 #[allow(clippy::needless_pass_by_value)]
 fn websocket_message_bytes(data: JsValue) -> Option<Vec<u8>> {
     if let Ok(buf) = data.clone().dyn_into::<js_sys::ArrayBuffer>() {

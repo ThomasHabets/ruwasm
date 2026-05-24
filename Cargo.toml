@@ -13,7 +13,7 @@ futures = "0.3.32"
 futures-channel = "0.3.32"
 futures-intrusive = "0.5.0"
 log = { version = "0.4.29", features = ["serde"] }
-rustradio = { version = "0.16.4", features = ["wasm"] }
+rustradio = { version = "0.16.6", features = ["wasm"] }
 #rustradio = { path = "../rustradio", features = ["wasm"] }
 rustradio_macros = "0.16.3"
 #rustradio = { git = "https://github.com/ThomasHabets/rustradio", branch = "wasm", features = ["wasm"] }

@@ -1,5 +1,5 @@
-//! `ws_stdout`: Run a websocket server that when connected on, streams the stdout
-//! from a command to the websocket client.
+//! `ws_stdout`: Run a websocket server that bridges a command's stdin/stdout to
+//! a websocket client.
 //!
 //! This is just a proof of concept while the actual protocol gets designed in
 //! `DATA_STREAM.md`.
@@ -14,7 +14,7 @@
 #![allow(clippy::cast_possible_truncation)]
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -24,6 +24,7 @@ use anyhow::Result;
 use clap::Parser;
 
 const MAX_HTTP_HEADER_BYTES: usize = 64 * 1024;
+const MAX_CLIENT_DATA_FRAME_BYTES: u64 = 64 * 1024;
 const WEBSOCKET_MAGIC: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, clap::ValueEnum)]
@@ -35,7 +36,7 @@ pub enum LogLevel {
     Trace,
 }
 
-/// Websocket server for stdout output streaming.
+/// Websocket server for command stdio bridging.
 #[derive(Parser)]
 #[clap(about, version)]
 struct Opt {
@@ -47,7 +48,7 @@ struct Opt {
     #[clap(short = 'v', default_value = "info")]
     verbose: LogLevel,
 
-    /// Command to run and read stdout from.
+    /// Command to run and bridge over the websocket.
     command: Vec<String>,
 }
 
@@ -141,8 +142,15 @@ fn handle_client(mut stream: TcpStream, opt: Arc<Opt>) -> io::Result<()> {
         let _ = write_ws_frame(&mut stream, 0x8, &close_payload(1011, "stdout unavailable"));
         return Err(io::Error::other("child stdout was not piped"));
     };
+    let Some(stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = write_ws_frame(&mut stream, 0x8, &close_payload(1011, "stdin unavailable"));
+        return Err(io::Error::other("child stdin was not piped"));
+    };
 
     let child = Arc::new(Mutex::new(child));
+    let child_stdin = Arc::new(Mutex::new(stdin));
     let disconnected = Arc::new(AtomicBool::new(false));
     let read_stream = stream.try_clone()?;
     let writer = Arc::new(Mutex::new(stream));
@@ -151,6 +159,7 @@ fn handle_client(mut stream: TcpStream, opt: Arc<Opt>) -> io::Result<()> {
         read_stream.try_clone()?,
         writer.clone(),
         child.clone(),
+        child_stdin,
         disconnected.clone(),
     );
 
@@ -199,7 +208,7 @@ fn handle_client(mut stream: TcpStream, opt: Arc<Opt>) -> io::Result<()> {
 fn spawn_command(command: &[String]) -> io::Result<Child> {
     Command::new(&command[0])
         .args(&command[1..])
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
@@ -209,6 +218,7 @@ fn spawn_disconnect_monitor(
     mut stream: TcpStream,
     writer: Arc<Mutex<TcpStream>>,
     child: Arc<Mutex<Child>>,
+    child_stdin: Arc<Mutex<ChildStdin>>,
     disconnected: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
@@ -226,6 +236,14 @@ fn spawn_disconnect_monitor(
                     0x9 => {
                         let mut writer = writer.lock().unwrap();
                         if write_ws_frame(&mut writer, 0xA, &frame.payload).is_err() {
+                            disconnected.store(true, Ordering::SeqCst);
+                            terminate_child(&child);
+                            break;
+                        }
+                    }
+                    0x1 | 0x2 => {
+                        let mut child_stdin = child_stdin.lock().unwrap();
+                        if child_stdin.write_all(&frame.payload).is_err() {
                             disconnected.store(true, Ordering::SeqCst);
                             terminate_child(&child);
                             break;
@@ -435,7 +453,14 @@ fn read_client_frame(stream: &mut TcpStream) -> io::Result<ClientFrame> {
         ));
     }
 
-    let keep_payload = matches!(opcode, 0x8..=0xA);
+    if matches!(opcode, 0x1 | 0x2) && len > MAX_CLIENT_DATA_FRAME_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "client data frame payload too large",
+        ));
+    }
+
+    let keep_payload = matches!(opcode, 0x1 | 0x2 | 0x8..=0xA);
     let payload = if keep_payload {
         let mut payload = vec![0u8; len as usize];
         stream.read_exact(&mut payload)?;
