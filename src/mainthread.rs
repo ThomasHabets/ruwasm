@@ -372,11 +372,11 @@ fn handle_websocket_protocol_packet(packet: Packet) -> Result<(), JsValue> {
 
 /// Decode all complete DATA_STREAM packets carried by a WebSocket message and
 /// feed data packets into the worker-facing source queue.
-fn handle_websocket_protocol_bytes(data: Vec<u8>) -> Result<(), JsValue> {
+fn handle_websocket_protocol_bytes(data: &[u8]) -> Result<(), JsValue> {
     if input_source() != InputSource::WebSocket {
         return Ok(());
     }
-    for packet in append_websocket_protocol_bytes(&data)? {
+    for packet in append_websocket_protocol_bytes(data)? {
         if !matches!(packet, Packet::Version(_)) && !websocket_peer_version_seen() {
             return Err(data_stream_error("peer sent data before Version packet"));
         }
@@ -736,7 +736,7 @@ fn connect_websocket(url: &str) -> Result<(), JsValue> {
         let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
             match websocket_message_bytes(event.data()) {
                 Some(data) => {
-                    if let Err(e) = handle_websocket_protocol_bytes(data) {
+                    if let Err(e) = handle_websocket_protocol_bytes(&data) {
                         close_websocket_after_error(&e);
                     }
                 }
