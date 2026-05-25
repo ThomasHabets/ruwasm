@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use log::{debug, error, info, warn};
-use rustradio::data_stream::{BytesReader, DataStreamId, PROTOCOL_VERSION, Packet, SyncWriter};
+use rustradio::data_stream::{BytesReader, DataStreamId, PROTOCOL_VERSION, Packet, PacketRef, SyncWriter};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::js_sys;
@@ -51,7 +51,6 @@ enum InputSource {
 struct WebSocketSourceState {
     chunks: VecDeque<Vec<u8>>,
     queued_bytes: usize,
-    reader: BytesReader,
     peer_version_seen: bool,
     eof: bool,
 }
@@ -63,7 +62,6 @@ impl WebSocketSourceState {
         Self {
             chunks: VecDeque::new(),
             queued_bytes: 0,
-            reader: BytesReader::new().with_max_packet_len(WS_MAX_PACKET_LEN),
             peer_version_seen: false,
             eof: false,
         }
@@ -77,6 +75,7 @@ thread_local! {
     static INPUT_SOURCE: RefCell<InputSource> = const { RefCell::new(InputSource::None) };
     static PENDING_DATA_REQUEST: RefCell<Option<ReqData>> = const { RefCell::new(None) };
     static WS_SOCKET: RefCell<Option<WebSocket>> = const { RefCell::new(None) };
+    static WS_SOURCE_READER: RefCell<BytesReader> = RefCell::new(BytesReader::new().with_max_packet_len(WS_MAX_PACKET_LEN));
     static WS_SOURCE_STATE: RefCell<WebSocketSourceState> = RefCell::new(WebSocketSourceState::new());
 }
 
@@ -140,12 +139,13 @@ fn satisfy_websocket_request(req: ReqData) -> Result<(), JsValue> {
 
 /// Convert browser input bytes into the data/EOF messages expected by the
 /// worker-side source block.
-fn send_data_or_eof(rcv: ReceiverId, data: Vec<u8>) -> Result<(), JsValue> {
+fn send_data_or_eof(rcv: ReceiverId, data: &[u8]) -> Result<(), JsValue> {
     if data.is_empty() {
         post_message(MainToWorker::Eof(rcv))
     } else {
         debug!("Main: sending {} input byte(s) to worker", data.len());
-        post_message(MainToWorker::Data(rcv, data))
+        // TODO: remove copy.
+        post_message(MainToWorker::Data(rcv, data.to_vec()))
     }
 }
 
@@ -195,7 +195,7 @@ fn reset_websocket_state() {
 
 /// Feed a WebSocket payload into the worker-facing stream, satisfying a parked
 /// request immediately when the graph is waiting for bytes.
-fn queue_websocket_data(data: Vec<u8>) -> Result<(), JsValue> {
+fn queue_websocket_data(data: &[u8]) -> Result<(), JsValue> {
     if data.is_empty() {
         return Ok(());
     }
@@ -315,19 +315,20 @@ fn refresh_websocket_window() -> Result<(), JsValue> {
 
 /// Push incoming WebSocket bytes into rustradio's chunk-oriented DATA_STREAM
 /// parser and drain all complete packets now available.
-fn append_websocket_protocol_bytes(data: &[u8]) -> Result<Vec<Packet>, JsValue> {
-    WS_SOURCE_STATE.with(|slot| {
+fn append_websocket_protocol_bytes(data: &[u8]) -> Result<Vec<PacketRef<'_>>, JsValue> {
+    WS_SOURCE_READER.with(|slot| {
         let mut state = slot.borrow_mut();
-        state.reader.push_bytes(data);
+        state.push_bytes(data);
         let mut packets = Vec::new();
 
         loop {
-            let Some(packet) = state.reader.read_packet().map_err(data_stream_error)? else {
+            let Some(packet) = state.read_packet_ref().map_err(data_stream_error)? else {
                 break;
             };
             packets.push(packet);
         }
-
+        // The borrows are no longer needed. Do one big drain.
+        state.do_drain();
         Ok(packets)
     })
 }
@@ -345,16 +346,16 @@ fn mark_websocket_peer_version_seen() -> Result<(), JsValue> {
 
 /// Apply a parsed DATA_STREAM packet to ruwasm's source state, accepting only
 /// the protocol messages expected from the producer.
-fn handle_websocket_protocol_packet(packet: Packet) -> Result<(), JsValue> {
+fn handle_websocket_protocol_packet(packet: PacketRef) -> Result<(), JsValue> {
     match packet {
-        Packet::Version(PROTOCOL_VERSION) => {
+        PacketRef::Version(PROTOCOL_VERSION) => {
             info!("Main: DATA_STREAM websocket peer version accepted");
             mark_websocket_peer_version_seen()
         }
-        Packet::Version(version) => Err(data_stream_error(format!(
+        PacketRef::Version(version) => Err(data_stream_error(format!(
             "unsupported protocol version {version}",
         ))),
-        Packet::Data(data) => {
+        PacketRef::Data(data) => {
             if data.stream_id.as_str() != WS_STREAM_ID {
                 return Err(data_stream_error(format!(
                     "unexpected DATA_STREAM id {}, want {WS_STREAM_ID}",
@@ -363,7 +364,7 @@ fn handle_websocket_protocol_packet(packet: Packet) -> Result<(), JsValue> {
             }
             queue_websocket_data(data.data)
         }
-        Packet::RequestData(req) => Err(data_stream_error(format!(
+        PacketRef::RequestData(req) => Err(data_stream_error(format!(
             "unexpected RequestData packet for {} with window {}",
             req.stream_id, req.window,
         ))),
@@ -377,7 +378,7 @@ fn handle_websocket_protocol_bytes(data: &[u8]) -> Result<(), JsValue> {
         return Ok(());
     }
     for packet in append_websocket_protocol_bytes(data)? {
-        if !matches!(packet, Packet::Version(_)) && !websocket_peer_version_seen() {
+        if !matches!(packet, PacketRef::Version(_)) && !websocket_peer_version_seen() {
             return Err(data_stream_error("peer sent data before Version packet"));
         }
         handle_websocket_protocol_packet(packet)?;
