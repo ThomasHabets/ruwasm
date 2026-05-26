@@ -12,6 +12,8 @@ use crate::mainthread::get_element;
 const ID_SPECTRUM_CANVAS: &str = "spectrum-graph";
 const ID_WATERFALL_CANVAS: &str = "waterfall-graph";
 const MAX_WATERFALL_FRAMES: usize = 40;
+const WATERFALL_MIN_DB: f32 = -120.0;
+const WATERFALL_MAX_DB: f32 = 0.0;
 const AXIS_MARGIN_LEFT: f64 = 54.0;
 const AXIS_MARGIN_RIGHT: f64 = 14.0;
 const AXIS_MARGIN_TOP: f64 = 12.0;
@@ -26,6 +28,9 @@ struct SpectrumState {
     latest: Option<FloatPduStream>,
     history: VecDeque<Vec<f32>>,
     sample_rate: f32,
+    waterfall_width: u32,
+    waterfall_height: u32,
+    waterfall_initialized: bool,
 }
 
 impl SpectrumState {
@@ -34,6 +39,9 @@ impl SpectrumState {
             latest: None,
             history: VecDeque::new(),
             sample_rate: 1.0,
+            waterfall_width: 0,
+            waterfall_height: 0,
+            waterfall_initialized: false,
         }
     }
 
@@ -199,15 +207,22 @@ fn draw_waterfall() -> Result<(), JsValue> {
     let grid = if is_dark { "#242424" } else { "#e7e7e7" };
     let text = if is_dark { "#ddd" } else { "#222" };
 
-    ctx.set_fill_style_str(bg);
-    ctx.fill_rect(0.0, 0.0, width, height);
-    ctx.set_stroke_style_str(axis);
-    ctx.stroke_rect(0.5, 0.5, (width - 1.0).max(0.0), (height - 1.0).max(0.0));
-
     SPECTRUM_STATE.with(|cell| -> Result<(), JsValue> {
         let mut opt = cell.borrow_mut();
         let state = opt.get_or_insert_with(SpectrumState::new);
+        let canvas_width = canvas.width();
+        let canvas_height = canvas.height();
+        let resized =
+            state.waterfall_width != canvas_width || state.waterfall_height != canvas_height;
+        state.waterfall_width = canvas_width;
+        state.waterfall_height = canvas_height;
+
         if state.history.is_empty() {
+            state.waterfall_initialized = false;
+            ctx.set_fill_style_str(bg);
+            ctx.fill_rect(0.0, 0.0, width, height);
+            ctx.set_stroke_style_str(axis);
+            ctx.stroke_rect(0.5, 0.5, (width - 1.0).max(0.0), (height - 1.0).max(0.0));
             ctx.set_fill_style_str(text);
             ctx.set_font("12px sans-serif");
             ctx.fill_text("Waiting for waterfall data...", 12.0, 20.0)?;
@@ -218,45 +233,51 @@ fn draw_waterfall() -> Result<(), JsValue> {
         let plot_top = AXIS_MARGIN_TOP.min((height - 1.0).max(0.0));
         let plot_width = (width - AXIS_MARGIN_LEFT - AXIS_MARGIN_RIGHT).max(1.0);
         let plot_height = (height - AXIS_MARGIN_TOP - AXIS_MARGIN_BOTTOM).max(1.0);
+        let row_height = (plot_height / MAX_WATERFALL_FRAMES as f64).max(1.0);
 
-        draw_waterfall_axes(
-            &ctx,
-            grid,
-            axis,
-            text,
-            plot_left,
-            plot_top,
-            plot_width,
-            plot_height,
-            state.sample_rate,
-        )?;
+        if resized || !state.waterfall_initialized {
+            ctx.set_fill_style_str(bg);
+            ctx.fill_rect(0.0, 0.0, width, height);
+            ctx.set_stroke_style_str(axis);
+            ctx.stroke_rect(0.5, 0.5, (width - 1.0).max(0.0), (height - 1.0).max(0.0));
 
-        let (mut min, mut max) = history_data_range(&state.history).unwrap_or((-120.0, 0.0));
-        if (max - min).abs() < f32::EPSILON {
-            min -= 1.0;
-            max += 1.0;
-        }
+            draw_waterfall_axes(
+                &ctx,
+                grid,
+                axis,
+                text,
+                plot_left,
+                plot_top,
+                plot_width,
+                plot_height,
+                state.sample_rate,
+            )?;
 
-        let rows = state.history.len();
-        let row_height = (plot_height / rows.max(1) as f64).max(1.0);
-        for (row_idx, frame) in state.history.iter().enumerate() {
-            if frame.is_empty() {
-                continue;
+            let visible_rows = (plot_height / row_height).floor().max(1.0) as usize;
+            let first_row = state.history.len().saturating_sub(visible_rows);
+            for (row_idx, frame) in state.history.iter().skip(first_row).enumerate() {
+                let y = plot_top + plot_height
+                    - (state.history.len() - first_row - row_idx) as f64 * row_height;
+                draw_waterfall_row(&ctx, frame, plot_left, y, plot_width, row_height);
             }
-            let len = frame.len();
-            let half = len / 2;
-            let bin_width = (plot_width / len.max(1) as f64).max(1.0);
-            let y = plot_top + row_idx as f64 * row_height;
-            for i in 0..len {
-                let value = frame[(i + half) % len];
-                ctx.set_fill_style_str(&waterfall_color(value, min, max));
-                ctx.fill_rect(
-                    plot_left + i as f64 * plot_width / len as f64,
-                    y,
-                    bin_width,
-                    row_height,
-                );
-            }
+            state.waterfall_initialized = true;
+        } else if let Some(frame) = state.history.back() {
+            let copy_height = (plot_height - row_height).max(1.0);
+            ctx.draw_image_with_html_canvas_element_and_sw_and_sh_and_dx_and_dy_and_dw_and_dh(
+                &canvas,
+                plot_left,
+                plot_top + row_height,
+                plot_width,
+                copy_height,
+                plot_left,
+                plot_top,
+                plot_width,
+                copy_height,
+            )?;
+            let y = plot_top + plot_height - row_height;
+            ctx.set_fill_style_str(bg);
+            ctx.fill_rect(plot_left, y, plot_width, row_height);
+            draw_waterfall_row(&ctx, frame, plot_left, y, plot_width, row_height);
         }
 
         Ok(())
@@ -282,22 +303,29 @@ fn data_range(values: &[f32]) -> Option<(f32, f32)> {
     }
 }
 
-fn history_data_range(history: &VecDeque<Vec<f32>>) -> Option<(f32, f32)> {
-    let mut min = f32::INFINITY;
-    let mut max = f32::NEG_INFINITY;
-    for frame in history {
-        for &value in frame {
-            if !value.is_finite() {
-                continue;
-            }
-            min = min.min(value);
-            max = max.max(value);
-        }
+fn draw_waterfall_row(
+    ctx: &CanvasRenderingContext2d,
+    frame: &[f32],
+    plot_left: f64,
+    y: f64,
+    plot_width: f64,
+    row_height: f64,
+) {
+    if frame.is_empty() {
+        return;
     }
-    if min.is_finite() && max.is_finite() {
-        Some((min, max))
-    } else {
-        None
+    let len = frame.len();
+    let half = len / 2;
+    let bin_width = (plot_width / len.max(1) as f64).max(1.0);
+    for i in 0..len {
+        let value = frame[(i + half) % len];
+        ctx.set_fill_style_str(waterfall_color(value));
+        ctx.fill_rect(
+            plot_left + i as f64 * plot_width / len as f64,
+            y,
+            bin_width,
+            row_height,
+        );
     }
 }
 
@@ -472,22 +500,17 @@ fn draw_waterfall_axes(
     Ok(())
 }
 
-fn waterfall_color(value: f32, min: f32, max: f32) -> String {
-    let t = ((value - min) / (max - min).max(1.0e-9)).clamp(0.0, 1.0);
-    let (r, g, b) = if t < 0.25 {
-        let u = t / 0.25;
-        (0.0, 22.0 + 58.0 * u, 95.0 + 120.0 * u)
-    } else if t < 0.5 {
-        let u = (t - 0.25) / 0.25;
-        (0.0, 80.0 + 130.0 * u, 215.0 - 115.0 * u)
-    } else if t < 0.75 {
-        let u = (t - 0.5) / 0.25;
-        (0.0 + 235.0 * u, 210.0 - 30.0 * u, 100.0 - 65.0 * u)
-    } else {
-        let u = (t - 0.75) / 0.25;
-        (235.0 + 20.0 * u, 180.0 + 62.0 * u, 35.0 + 200.0 * u)
-    };
-    format!("rgb({r:.0}, {g:.0}, {b:.0})")
+fn waterfall_color(value: f32) -> &'static str {
+    const COLORS: [&str; 16] = [
+        "#00165f", "#002a86", "#0040ad", "#0059c8", "#0074d0", "#008fc2", "#00a9aa", "#17bd8b",
+        "#4cc869", "#84ce4b", "#bfd13d", "#e8ca39", "#f5ae32", "#f58a2d", "#ee632f", "#ebebeb",
+    ];
+    if !value.is_finite() {
+        return COLORS[0];
+    }
+    let t = ((value - WATERFALL_MIN_DB) / (WATERFALL_MAX_DB - WATERFALL_MIN_DB)).clamp(0.0, 1.0);
+    let idx = (t * (COLORS.len() - 1) as f32).round() as usize;
+    COLORS[idx]
 }
 
 fn format_hz(value: f64) -> String {
