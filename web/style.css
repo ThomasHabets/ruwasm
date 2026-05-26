@@ -373,6 +373,15 @@ h1 {
   background: var(--surface-muted);
 }
 
+#spectrum-graph {
+  display: block;
+  width: 100%;
+  height: clamp(280px, 32vh, 380px);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-muted);
+}
+
 .plot-surface {
   position: relative;
   min-height: 18rem;

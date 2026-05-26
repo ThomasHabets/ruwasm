@@ -12,8 +12,10 @@ use wasm_bindgen::prelude::*;
 mod complex_sink;
 mod constellation_sink;
 mod domlogger;
+mod float_pdu_sink;
 mod float_sink;
 mod mainthread;
+mod spectrum_sink;
 mod time_sink;
 mod wasm_graph;
 mod wasm_source;
@@ -43,6 +45,13 @@ pub struct ComplexStream {
     pub name: String,
     pub tags: Vec<rustradio::stream::Tag>,
     pub samples: Vec<rustradio::Complex>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, PartialOrd)]
+pub struct FloatPduStream {
+    pub name: String,
+    pub sample_rate: rustradio::Float,
+    pub samples: Vec<rustradio::Float>,
 }
 
 /// Messages going from main (UI) thread to worker.
@@ -123,6 +132,9 @@ enum WorkerToMain {
 
     /// Complex streams captured in the worker graph.
     ComplexStreams(Vec<ComplexStream>),
+
+    /// Float PDU streams captured in the worker graph.
+    FloatPduStreams(Vec<FloatPduStream>),
 }
 
 impl TryInto<wasm_bindgen::JsValue> for WorkerToMain {

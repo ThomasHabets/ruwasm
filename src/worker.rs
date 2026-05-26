@@ -22,6 +22,7 @@ use crate::{MainToWorker, WorkerToMain};
 const SOURCE_CHANNEL_SIZE: usize = 10;
 const IF_SAMPLE_RATE: usize = 50_000;
 const VIZ_SAMPLE_RATE: usize = 1_000;
+const SPECTRUM_SIZE: usize = 1024;
 
 struct GraphComms {
     src: HashMap<ReceiverId, async_channel::Sender<crate::wasm_source::Msg>>,
@@ -190,6 +191,7 @@ async fn radio_1200(samp_rate: u64, rtlsdr: bool) -> rustradio::Result<String> {
             .build(prev)
             .map_err(|e| rustradio::Error::wrap(e, "rational resampler"))?,
     ];
+    let prev = add_spectrum_tap(&mut g, prev);
     let prev = add_viz_taps(&mut g, prev)?;
     let prev = blockchain![
         g,
@@ -251,6 +253,31 @@ async fn radio_1200(samp_rate: u64, rtlsdr: bool) -> rustradio::Result<String> {
         outs.join("\n")
     };
     Ok(result)
+}
+
+/// Tee off the downsampled IF stream into FFT spectrum frames for the UI.
+fn add_spectrum_tap(
+    g: &mut crate::wasm_graph::WasmGraph,
+    src: ReadStream<rustradio::Complex>,
+) -> ReadStream<rustradio::Complex> {
+    let (tee, src, prev) = Tee::new(src);
+    g.add(Box::new(tee));
+
+    let prev = blockchain![
+        g,
+        prev,
+        FftStream::new(prev, SPECTRUM_SIZE),
+        Map::keep_tags(prev, "fft_power_db", |bin: rustradio::Complex| {
+            let power = (bin.norm_sqr() / SPECTRUM_SIZE as f32).max(1.0e-20);
+            10.0 * power.log10()
+        }),
+        StreamToPdu::new(prev, rustradio::fft_stream::TAG_FRAME, SPECTRUM_SIZE, 1)
+    ];
+    let sink =
+        crate::float_pdu_sink::FloatPduSink::new(prev, "iq_spectrum".into(), IF_SAMPLE_RATE as f32);
+    g.add(Box::new(sink));
+
+    src
 }
 
 /// Tee off one downsampled complex stream for the visualization sinks.

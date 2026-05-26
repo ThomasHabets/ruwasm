@@ -135,20 +135,17 @@
         <section class="panel visual-panel" data-viz-slot="spectrum">
           <div class="panel-header">
             <div>
-              <h3 class="panel-title">Spectrum (not implemented yet)</h3>
-              <p class="panel-kicker">Frequency domain</p>
+              <h3 class="panel-title">Spectrum</h3>
+              <p class="panel-kicker">FFT power frame</p>
             </div>
           </div>
           <div class="panel-body">
-            <div class="plot-surface" aria-hidden="true">
-              <span class="slot-label">Ready</span>
-              <div class="spectrum-trace"></div>
-            </div>
+            <canvas id="spectrum-graph"></canvas>
           </div>
         </section>
       </div>
     </section>
-    <section class="panel visual-panel" data-viz-slot="spectrum">
+    <section class="panel visual-panel" data-viz-slot="log">
             <div class="panel-header">
                     <h3 class="panel-title">Log</h3>
             </div>
