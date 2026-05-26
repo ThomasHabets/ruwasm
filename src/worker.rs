@@ -20,6 +20,8 @@ use crate::{MainToWorker, WorkerToMain};
 
 // TODO: magic values.
 const SOURCE_CHANNEL_SIZE: usize = 10;
+const IF_SAMPLE_RATE: usize = 50_000;
+const VIZ_SAMPLE_RATE: usize = 1_000;
 
 struct GraphComms {
     src: HashMap<ReceiverId, async_channel::Sender<crate::wasm_source::Msg>>,
@@ -149,7 +151,7 @@ async fn radio_1200(samp_rate: u64, rtlsdr: bool) -> rustradio::Result<String> {
 
     // Decoder parameters.
     let samp_rate = samp_rate as f32;
-    let if_rate = 50_000.0;
+    let if_rate = IF_SAMPLE_RATE as f32;
     let baud = 1200.0;
     let freq1 = 1200.0;
     let freq2 = 2200.0;
@@ -188,7 +190,7 @@ async fn radio_1200(samp_rate: u64, rtlsdr: bool) -> rustradio::Result<String> {
             .build(prev)
             .map_err(|e| rustradio::Error::wrap(e, "rational resampler"))?,
     ];
-    let prev = add_complex_mag_tap(&mut g, "iq_mag", prev)?;
+    let prev = add_viz_taps(&mut g, prev)?;
     let prev = blockchain![
         g,
         prev,
@@ -251,29 +253,37 @@ async fn radio_1200(samp_rate: u64, rtlsdr: bool) -> rustradio::Result<String> {
     Ok(result)
 }
 
-/// Helper function to tee off into a FloatSink (to a graph).
-fn add_complex_mag_tap(
+/// Tee off one downsampled complex stream for the visualization sinks.
+fn add_viz_taps(
     g: &mut crate::wasm_graph::WasmGraph,
-    name: impl Into<String>,
     src: ReadStream<rustradio::Complex>,
 ) -> rustradio::Result<ReadStream<rustradio::Complex>> {
-    let samp_rate = 50_000;
-    let samp_rate_2 = 1_000; // TODO: if you change this, change the time
+    // TODO: if you change this, change the time
     // sink value in mainthread.rs too.
     // and also in time_sink for max number of samples.
-    let (tee, src, prev) = Tee::new(src);
+    let (input_tee, src, prev) = Tee::new(src);
+    g.add(Box::new(input_tee));
+
     let prev = blockchain![
         g,
         prev,
         RationalResampler::builder()
-            .deci(samp_rate)
-            .interp(samp_rate_2)
-            .build(prev)?,
-        ComplexToMag2::new(prev)
+            .deci(IF_SAMPLE_RATE)
+            .interp(VIZ_SAMPLE_RATE)
+            .build(prev)?
     ];
-    let sink = crate::float_sink::FloatSink::new(prev, name.into());
-    g.add(Box::new(tee));
-    g.add(Box::new(sink));
+
+    let (viz_tee, constellation_prev, mag_prev) = Tee::new(prev);
+    g.add(Box::new(viz_tee));
+
+    let mag_prev = blockchain![g, mag_prev, ComplexToMag2::new(mag_prev)];
+
+    let constellation_sink =
+        crate::complex_sink::ComplexSink::new(constellation_prev, "iq_constellation".into());
+    let mag_sink = crate::float_sink::FloatSink::new(mag_prev, "iq_mag".into());
+    g.add(Box::new(constellation_sink));
+    g.add(Box::new(mag_sink));
+
     Ok(src)
 }
 

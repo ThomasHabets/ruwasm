@@ -428,6 +428,14 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
             }
             crate::time_sink::update(streams)?;
         }
+        WorkerToMain::ComplexStreams(streams) => {
+            let lens: Vec<_> = streams.iter().map(|s| s.samples.len()).collect();
+            debug!(
+                "Main: received {} complex stream(s) lens {lens:?}",
+                streams.len()
+            );
+            crate::constellation_sink::update(streams)?;
+        }
         WorkerToMain::Ping(t) => {
             post_message(MainToWorker::Pong(t)).unwrap();
         }
@@ -648,6 +656,7 @@ WASM built by Rust version: {}",
     )?;
 
     crate::time_sink::setup_graph_ui()?;
+    crate::constellation_sink::setup_graph_ui()?;
 
     Ok(())
 }

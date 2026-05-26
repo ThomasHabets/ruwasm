@@ -9,6 +9,8 @@ use log::info;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
+mod complex_sink;
+mod constellation_sink;
 mod domlogger;
 mod float_sink;
 mod mainthread;
@@ -34,6 +36,13 @@ pub struct FloatStream {
     pub name: String,
     pub tags: Vec<rustradio::stream::Tag>,
     pub samples: Vec<rustradio::Float>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct ComplexStream {
+    pub name: String,
+    pub tags: Vec<rustradio::stream::Tag>,
+    pub samples: Vec<rustradio::Complex>,
 }
 
 /// Messages going from main (UI) thread to worker.
@@ -111,6 +120,9 @@ enum WorkerToMain {
 
     /// Float streams captured in the worker graph.
     FloatStreams(Vec<FloatStream>),
+
+    /// Complex streams captured in the worker graph.
+    ComplexStreams(Vec<ComplexStream>),
 }
 
 impl TryInto<wasm_bindgen::JsValue> for WorkerToMain {

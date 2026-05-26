@@ -120,24 +120,15 @@
           </div>
         </section>
 
-        <!-- Future plot slots can be replaced with canvases while keeping the grid. -->
         <section class="panel visual-panel" data-viz-slot="constellation">
           <div class="panel-header">
             <div>
-              <h3 class="panel-title">Constellation (not implemented yet)</h3>
-              <p class="panel-kicker">Symbol plane</p>
+              <h3 class="panel-title">Constellation</h3>
+              <p class="panel-kicker">1 ksps I/Q sample plane</p>
             </div>
           </div>
           <div class="panel-body">
-            <div class="plot-surface" aria-hidden="true">
-              <span class="slot-label">Ready</span>
-              <div class="constellation-points">
-                <span style="--x: 32%; --y: 34%;"></span>
-                <span style="--x: 68%; --y: 35%;"></span>
-                <span style="--x: 35%; --y: 68%;"></span>
-                <span style="--x: 66%; --y: 66%;"></span>
-              </div>
-            </div>
+            <canvas id="constellation-graph"></canvas>
           </div>
         </section>
 
