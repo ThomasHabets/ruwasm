@@ -203,9 +203,13 @@ fn queue_websocket_data(data: Vec<u8>) -> Result<(), JsValue> {
         return Ok(());
     }
     if data.len() > WS_WINDOW_BYTES {
+        warn!("websocket input packet exceeded receive window. Dropping");
+        return Ok(());
+        /*
         return Err(JsValue::from_str(
             "websocket input packet exceeded receive window",
         ));
+        */
     }
 
     if let Some(req) = take_pending_request() {
@@ -213,13 +217,20 @@ fn queue_websocket_data(data: Vec<u8>) -> Result<(), JsValue> {
     } else {
         WS_SOURCE_STATE.with(|slot| {
             let mut state = slot.borrow_mut();
-            state.queued_bytes = state
+            let new_queued_bytes = state
                 .queued_bytes
                 .checked_add(data.len())
                 .ok_or_else(|| JsValue::from_str("websocket input queue length overflow"))?;
-            if state.queued_bytes > WS_WINDOW_BYTES {
-                return Err(JsValue::from_str("websocket input exceeded receive window"));
+            if new_queued_bytes > WS_WINDOW_BYTES {
+                warn!("websocket input queued bytes exceeded receive window. Dropping.");
+                if false {
+                    return Err(JsValue::from_str(
+                        "websocket input queued bytes exceeded receive window",
+                    ));
+                }
+                return Ok(());
             }
+            state.queued_bytes = new_queued_bytes;
             state.chunks.push_back(data);
             Ok(())
         })?;

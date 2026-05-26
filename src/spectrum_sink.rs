@@ -1,6 +1,7 @@
 //! Like time sink, this is mostly LLM coded. It does work as a proof of
 //! concept, but it needs to be properly reviewed.
 use std::cell::RefCell;
+use std::collections::VecDeque;
 
 use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, Event, HtmlCanvasElement};
@@ -9,6 +10,8 @@ use crate::FloatPduStream;
 use crate::mainthread::get_element;
 
 const ID_SPECTRUM_CANVAS: &str = "spectrum-graph";
+const ID_WATERFALL_CANVAS: &str = "waterfall-graph";
+const MAX_WATERFALL_FRAMES: usize = 40;
 const AXIS_MARGIN_LEFT: f64 = 54.0;
 const AXIS_MARGIN_RIGHT: f64 = 14.0;
 const AXIS_MARGIN_TOP: f64 = 12.0;
@@ -21,15 +24,28 @@ thread_local! {
 
 struct SpectrumState {
     latest: Option<FloatPduStream>,
+    history: VecDeque<Vec<f32>>,
+    sample_rate: f32,
 }
 
 impl SpectrumState {
     fn new() -> Self {
-        Self { latest: None }
+        Self {
+            latest: None,
+            history: VecDeque::new(),
+            sample_rate: 1.0,
+        }
     }
 
     fn set_latest(&mut self, frames: Vec<FloatPduStream>) {
-        if let Some(frame) = frames.into_iter().last() {
+        for frame in frames {
+            if !frame.samples.is_empty() {
+                self.sample_rate = frame.sample_rate;
+                self.history.push_back(frame.samples.clone());
+                while self.history.len() > MAX_WATERFALL_FRAMES {
+                    self.history.pop_front();
+                }
+            }
             self.latest = Some(frame);
         }
     }
@@ -45,13 +61,18 @@ fn with_spectrum_state<T>(f: impl FnOnce(&mut SpectrumState) -> T) -> T {
 
 pub(crate) fn setup_graph_ui() -> Result<(), JsValue> {
     let handler = Closure::<dyn FnMut(Event)>::new(move |_e: Event| {
-        let _ = draw_graph();
+        let _ = draw_all();
     });
     let window = web_sys::window().ok_or(JsValue::from_str("no window"))?;
     window.add_event_listener_with_callback("resize", handler.as_ref().unchecked_ref())?;
     handler.forget();
 
-    draw_graph()
+    draw_all()
+}
+
+fn draw_all() -> Result<(), JsValue> {
+    draw_graph()?;
+    draw_waterfall()
 }
 
 fn resize_canvas_to_display_size(canvas: &HtmlCanvasElement) -> Result<(f64, f64), JsValue> {
@@ -161,6 +182,89 @@ fn draw_graph() -> Result<(), JsValue> {
     Ok(())
 }
 
+fn draw_waterfall() -> Result<(), JsValue> {
+    let canvas = get_element(ID_WATERFALL_CANVAS)?.dyn_into::<HtmlCanvasElement>()?;
+    let (width, height) = resize_canvas_to_display_size(&canvas)?;
+    let ctx = canvas
+        .get_context("2d")?
+        .ok_or(JsValue::from_str("no 2d context"))?
+        .dyn_into::<CanvasRenderingContext2d>()?;
+
+    let window = web_sys::window().ok_or(JsValue::from_str("no window"))?;
+    let is_dark = window
+        .match_media("(prefers-color-scheme: dark)")?
+        .is_some_and(|m| m.matches());
+    let bg = if is_dark { "#0b0b0b" } else { "#ffffff" };
+    let axis = if is_dark { "#666" } else { "#888" };
+    let grid = if is_dark { "#242424" } else { "#e7e7e7" };
+    let text = if is_dark { "#ddd" } else { "#222" };
+
+    ctx.set_fill_style_str(bg);
+    ctx.fill_rect(0.0, 0.0, width, height);
+    ctx.set_stroke_style_str(axis);
+    ctx.stroke_rect(0.5, 0.5, (width - 1.0).max(0.0), (height - 1.0).max(0.0));
+
+    SPECTRUM_STATE.with(|cell| -> Result<(), JsValue> {
+        let mut opt = cell.borrow_mut();
+        let state = opt.get_or_insert_with(SpectrumState::new);
+        if state.history.is_empty() {
+            ctx.set_fill_style_str(text);
+            ctx.set_font("12px sans-serif");
+            ctx.fill_text("Waiting for waterfall data...", 12.0, 20.0)?;
+            return Ok(());
+        }
+
+        let plot_left = AXIS_MARGIN_LEFT.min((width - 1.0).max(0.0));
+        let plot_top = AXIS_MARGIN_TOP.min((height - 1.0).max(0.0));
+        let plot_width = (width - AXIS_MARGIN_LEFT - AXIS_MARGIN_RIGHT).max(1.0);
+        let plot_height = (height - AXIS_MARGIN_TOP - AXIS_MARGIN_BOTTOM).max(1.0);
+
+        draw_waterfall_axes(
+            &ctx,
+            grid,
+            axis,
+            text,
+            plot_left,
+            plot_top,
+            plot_width,
+            plot_height,
+            state.sample_rate,
+        )?;
+
+        let (mut min, mut max) = history_data_range(&state.history).unwrap_or((-120.0, 0.0));
+        if (max - min).abs() < f32::EPSILON {
+            min -= 1.0;
+            max += 1.0;
+        }
+
+        let rows = state.history.len();
+        let row_height = (plot_height / rows.max(1) as f64).max(1.0);
+        for (row_idx, frame) in state.history.iter().enumerate() {
+            if frame.is_empty() {
+                continue;
+            }
+            let len = frame.len();
+            let half = len / 2;
+            let bin_width = (plot_width / len.max(1) as f64).max(1.0);
+            let y = plot_top + row_idx as f64 * row_height;
+            for i in 0..len {
+                let value = frame[(i + half) % len];
+                ctx.set_fill_style_str(&waterfall_color(value, min, max));
+                ctx.fill_rect(
+                    plot_left + i as f64 * plot_width / len as f64,
+                    y,
+                    bin_width,
+                    row_height,
+                );
+            }
+        }
+
+        Ok(())
+    })?;
+
+    Ok(())
+}
+
 fn data_range(values: &[f32]) -> Option<(f32, f32)> {
     let mut min = f32::INFINITY;
     let mut max = f32::NEG_INFINITY;
@@ -170,6 +274,25 @@ fn data_range(values: &[f32]) -> Option<(f32, f32)> {
         }
         min = min.min(value);
         max = max.max(value);
+    }
+    if min.is_finite() && max.is_finite() {
+        Some((min, max))
+    } else {
+        None
+    }
+}
+
+fn history_data_range(history: &VecDeque<Vec<f32>>) -> Option<(f32, f32)> {
+    let mut min = f32::INFINITY;
+    let mut max = f32::NEG_INFINITY;
+    for frame in history {
+        for &value in frame {
+            if !value.is_finite() {
+                continue;
+            }
+            min = min.min(value);
+            max = max.max(value);
+        }
     }
     if min.is_finite() && max.is_finite() {
         Some((min, max))
@@ -275,6 +398,98 @@ fn draw_axes(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn draw_waterfall_axes(
+    ctx: &CanvasRenderingContext2d,
+    grid: &str,
+    axis: &str,
+    text: &str,
+    plot_left: f64,
+    plot_top: f64,
+    plot_width: f64,
+    plot_height: f64,
+    sample_rate: f32,
+) -> Result<(), JsValue> {
+    let plot_right = plot_left + plot_width;
+    let plot_bottom = plot_top + plot_height;
+
+    ctx.set_stroke_style_str(grid);
+    ctx.set_line_width(1.0);
+    for i in 0..AXIS_TICK_COUNT {
+        let t = if AXIS_TICK_COUNT <= 1 {
+            0.0
+        } else {
+            i as f64 / (AXIS_TICK_COUNT - 1) as f64
+        };
+        let x = plot_left + t * plot_width;
+        ctx.begin_path();
+        ctx.move_to(x, plot_top);
+        ctx.line_to(x, plot_bottom);
+        ctx.stroke();
+    }
+
+    ctx.set_stroke_style_str(axis);
+    ctx.begin_path();
+    ctx.move_to(plot_left, plot_top);
+    ctx.line_to(plot_left, plot_bottom);
+    ctx.line_to(plot_right, plot_bottom);
+    ctx.stroke();
+
+    ctx.set_fill_style_str(text);
+    ctx.set_font("12px sans-serif");
+    ctx.set_text_align("center");
+    ctx.set_text_baseline("top");
+    for i in 0..AXIS_TICK_COUNT {
+        let t = if AXIS_TICK_COUNT <= 1 {
+            0.0
+        } else {
+            i as f64 / (AXIS_TICK_COUNT - 1) as f64
+        };
+        let freq = (t - 0.5) * f64::from(sample_rate);
+        ctx.fill_text(
+            &format_hz(freq),
+            plot_left + t * plot_width,
+            plot_bottom + 6.0,
+        )?;
+    }
+
+    ctx.set_text_align("center");
+    ctx.set_text_baseline("top");
+    ctx.fill_text(
+        "Frequency (Hz)",
+        plot_left + plot_width / 2.0,
+        plot_bottom + 20.0,
+    )?;
+
+    ctx.save();
+    ctx.translate(plot_left - 40.0, plot_top + plot_height / 2.0)?;
+    ctx.rotate(-std::f64::consts::FRAC_PI_2)?;
+    ctx.set_text_align("center");
+    ctx.set_text_baseline("top");
+    ctx.fill_text("Time", 0.0, 0.0)?;
+    ctx.restore();
+
+    Ok(())
+}
+
+fn waterfall_color(value: f32, min: f32, max: f32) -> String {
+    let t = ((value - min) / (max - min).max(1.0e-9)).clamp(0.0, 1.0);
+    let (r, g, b) = if t < 0.25 {
+        let u = t / 0.25;
+        (0.0, 22.0 + 58.0 * u, 95.0 + 120.0 * u)
+    } else if t < 0.5 {
+        let u = (t - 0.25) / 0.25;
+        (0.0, 80.0 + 130.0 * u, 215.0 - 115.0 * u)
+    } else if t < 0.75 {
+        let u = (t - 0.5) / 0.25;
+        (0.0 + 235.0 * u, 210.0 - 30.0 * u, 100.0 - 65.0 * u)
+    } else {
+        let u = (t - 0.75) / 0.25;
+        (235.0 + 20.0 * u, 180.0 + 62.0 * u, 35.0 + 200.0 * u)
+    };
+    format!("rgb({r:.0}, {g:.0}, {b:.0})")
+}
+
 fn format_hz(value: f64) -> String {
     let abs = value.abs();
     if abs >= 1000.0 {
@@ -287,5 +502,5 @@ fn format_hz(value: f64) -> String {
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn update(frames: Vec<FloatPduStream>) -> Result<(), JsValue> {
     with_spectrum_state(|state| state.set_latest(frames));
-    draw_graph()
+    draw_all()
 }
