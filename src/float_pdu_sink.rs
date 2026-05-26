@@ -36,7 +36,7 @@ impl Block for FloatPduSink {
             };
             self.skip += 1;
             // TODO: after we have averaging, set this back to 1.
-            if self.skip == 10 {
+            if self.skip == 1 {
                 self.post_frame(samples)?;
                 self.skip = 0;
             }

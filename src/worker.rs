@@ -262,7 +262,8 @@ fn add_spectrum_tap(
             let power = (bin.norm_sqr() / SPECTRUM_SIZE as f32).max(1.0e-20);
             10.0 * power.log10()
         }),
-        StreamToPdu::new(prev, rustradio::fft_stream::TAG_FRAME, SPECTRUM_SIZE, 1)
+        StreamToPdu::new(prev, rustradio::fft_stream::TAG_FRAME, SPECTRUM_SIZE, 1),
+        PduAverage::new(prev, 10),
     ];
     let sink =
         crate::float_pdu_sink::FloatPduSink::new(prev, "iq_spectrum".into(), IF_SAMPLE_RATE as f32);
