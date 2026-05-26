@@ -11,6 +11,9 @@ pub struct FloatPduSink {
     sample_rate: Float,
     #[rustradio(in)]
     src: NCReadStream<Vec<Float>>,
+
+    #[rustradio(default)]
+    skip: usize,
 }
 
 impl FloatPduSink {
@@ -27,10 +30,16 @@ impl FloatPduSink {
 
 impl Block for FloatPduSink {
     fn work(&mut self) -> rustradio::Result<BlockRet<'_>> {
-        let Some((samples, _tags)) = self.src.pop() else {
-            return Ok(BlockRet::WaitForStream(&self.src, 1));
-        };
-        self.post_frame(samples)?;
-        Ok(BlockRet::Again)
+        loop {
+            let Some((samples, _tags)) = self.src.pop() else {
+                return Ok(BlockRet::WaitForStream(&self.src, 1));
+            };
+            self.skip += 1;
+            // TODO: after we have averaging, set this back to 1.
+            if self.skip == 10 {
+                self.post_frame(samples)?;
+                self.skip = 0;
+            }
+        }
     }
 }
