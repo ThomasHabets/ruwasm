@@ -1,9 +1,16 @@
+//! A sink block that posts PDUs of float from worker to main UI thread.
 use rustradio::block::{Block, BlockRet};
 use rustradio::stream::NCReadStream;
 use rustradio::{Error, Float};
 
+use crate::worker::post_message;
 use crate::{FloatPduStream, WorkerToMain};
 
+const DEBUG_KEEP_1_IN_N: usize = 1;
+
+/// A block that takes a PDU full of floats and posts it to the main UI thread.
+///
+/// The stream is identified by its name.
 #[derive(rustradio_macros::Block)]
 #[rustradio(new)]
 pub struct FloatPduSink {
@@ -12,20 +19,9 @@ pub struct FloatPduSink {
     #[rustradio(in)]
     src: NCReadStream<Vec<Float>>,
 
+    // This is used for debugging only.
     #[rustradio(default)]
     skip: usize,
-}
-
-impl FloatPduSink {
-    fn post_frame(&self, samples: Vec<Float>) -> rustradio::Result<()> {
-        crate::worker::post_message(&WorkerToMain::FloatPduStreams(vec![FloatPduStream {
-            name: self.name.clone(),
-            sample_rate: self.sample_rate,
-            samples,
-        }]))
-        .map_err(|e| Error::msg(format!("post float PDU stream: {e:?}")))?;
-        Ok(())
-    }
 }
 
 impl Block for FloatPduSink {
@@ -35,9 +31,14 @@ impl Block for FloatPduSink {
                 return Ok(BlockRet::WaitForStream(&self.src, 1));
             };
             self.skip += 1;
-            // TODO: after we have averaging, set this back to 1.
-            if self.skip == 1 {
-                self.post_frame(samples)?;
+            if self.skip == DEBUG_KEEP_1_IN_N {
+                // This should not introduce a copy.
+                post_message(&WorkerToMain::FloatPduStreams(vec![FloatPduStream {
+                    name: self.name.clone(),
+                    sample_rate: self.sample_rate,
+                    samples,
+                }]))
+                .map_err(|e| Error::msg(format!("post float PDU stream: {e:?}")))?;
                 self.skip = 0;
             }
         }

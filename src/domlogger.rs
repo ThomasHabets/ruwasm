@@ -1,9 +1,12 @@
+//! Log provider that logs both to the browser console and to an element in the
+//! web page DOM.
 use std::collections::VecDeque;
 
 use log::{Level, LevelFilter, Log, Metadata, Record};
 use wasm_bindgen::JsCast;
 use web_sys::{HtmlElement, window};
 
+// TODO: make configurable.
 const MAX_LOG_MESSAGES: usize = 1000;
 
 struct DomConsoleLogger {
@@ -69,12 +72,15 @@ impl Log for DomConsoleLogger {
 
 pub fn init_logging() -> Result<(), log::SetLoggerError> {
     static LOGGER: DomConsoleLogger = DomConsoleLogger {
-        level: LevelFilter::Debug,
+        // Make consistent, and configurable.
+        level: LevelFilter::Info,
+        // TODO: make the ID configurable.
         element_id: "log-output",
         log_lines: std::sync::Mutex::new(VecDeque::new()),
     };
 
     log::set_logger(&LOGGER)?;
+    // Make consistent, and configurable.
     log::set_max_level(LevelFilter::Info);
     Ok(())
 }

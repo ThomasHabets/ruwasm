@@ -1,3 +1,5 @@
+//! Block for getting data from the UI thread, which in turn is getting it from
+//! websocket or a file.
 use rustradio::block::{Block, BlockRet};
 use rustradio::stream::{ReadStream, WriteStream, new_stream};
 use rustradio::{Error, Result};
@@ -13,6 +15,8 @@ pub enum Msg {
     Extend(Vec<u8>),
 }
 
+/// Block for getting data from the UI thread, which in turn gets it from
+/// websocket (data stream) or a file.
 #[derive(rustradio_macros::Block)]
 pub struct WasmSource {
     buf: Vec<u8>,
@@ -98,13 +102,6 @@ impl Block for WasmSource {
             let n = self.buf.len().min(o.len());
             o.slice()[..n].copy_from_slice(&self.buf[..n]);
             o.produce(n, &[]);
-
-            if self.buf.len() > 100_000 {
-                // This sometimes crashes and logs
-                // Draining 0..65536 of 1016276902
-                // wasm-bindgen: imported JS function that was not marked as `catch` threw an error: memory access out of bounds
-                log::debug!("WEIRD: Draining 0..{n} of {}", self.buf.len());
-            }
             self.buf.drain(0..n);
         }
     }

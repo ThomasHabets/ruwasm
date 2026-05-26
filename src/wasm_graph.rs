@@ -1,3 +1,4 @@
+//! Graph executor for WASM.
 use log::{info, trace};
 
 //use futures::channel::mpsc;
@@ -8,6 +9,14 @@ use log::{info, trace};
 use rustradio::block::{Block, BlockRet};
 use rustradio::graph::{CancellationToken, GraphRunner};
 
+/// Graph executor for use in WASM.
+///
+/// It needs to be a bit special because it needs to be async, and not use
+/// system stuff like clock.
+///
+/// Means we can't get much statistics.
+///
+/// Possibly this could be merged with the rustradio `AsyncGraph`.
 pub struct WasmGraph {
     blocks: Vec<Box<dyn Block>>,
 }

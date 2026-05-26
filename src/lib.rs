@@ -40,11 +40,30 @@ pub struct FloatStream {
     pub samples: Vec<rustradio::Float>,
 }
 
+/// Borrow version of FloatStream.
+#[derive(Serialize)]
+struct FloatStreamRef<'a> {
+    name: &'a str,
+    tags: Vec<rustradio::stream::Tag>,
+    samples: &'a [rustradio::Float],
+}
+
+/// Stream of data between worker and main UI.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ComplexStream {
     pub name: String,
     pub tags: Vec<rustradio::stream::Tag>,
     pub samples: Vec<rustradio::Complex>,
+}
+
+/// Borrow version of ComplexStream, for less copying.
+///
+/// Must serialize the same as `ComplexStream`.
+#[derive(Serialize)]
+struct ComplexStreamRef<'a> {
+    name: &'a str,
+    tags: Vec<rustradio::stream::Tag>,
+    samples: &'a [rustradio::Complex],
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, PartialOrd)]
@@ -104,6 +123,8 @@ struct ReqData {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 enum WorkerToMain {
+    /// Worker notifying the main UI thread that the rustradio graph has
+    /// successfully started.
     Ready,
 
     /// Send a ping with a `performance.now()` timestamp.
@@ -122,10 +143,7 @@ enum WorkerToMain {
     Result(String),
 
     /// A worker log line to be emitted through the main thread logger.
-    LogLine {
-        level: log::Level,
-        line: String,
-    },
+    LogLine { level: log::Level, line: String },
 
     /// Float streams captured in the worker graph.
     FloatStreams(Vec<FloatStream>),
@@ -135,6 +153,14 @@ enum WorkerToMain {
 
     /// Float PDU streams captured in the worker graph.
     FloatPduStreams(Vec<FloatPduStream>),
+}
+
+/// Borrowed version of WorkerToMain. Must serialize the same.
+#[derive(Serialize)]
+#[serde(tag = "type", content = "data")]
+enum WorkerToMainRef<'a> {
+    FloatStreams(Vec<FloatStreamRef<'a>>),
+    ComplexStreams(Vec<ComplexStreamRef<'a>>),
 }
 
 impl TryInto<wasm_bindgen::JsValue> for WorkerToMain {

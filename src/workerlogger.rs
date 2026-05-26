@@ -1,3 +1,7 @@
+//! Log provider that logs to the main UI thread.
+//!
+//! It does not log directly to the console, even though workers can, because
+//! the main thread wants to prefix the lines.
 use log::{Level, LevelFilter, Log, Metadata, Record};
 use wasm_bindgen::JsCast;
 use web_sys::DedicatedWorkerGlobalScope;
@@ -47,12 +51,15 @@ impl Log for WorkerLogger {
     fn flush(&self) {}
 }
 
+/// Initialize worker logger.
 pub fn init_logging() -> Result<(), log::SetLoggerError> {
     static LOGGER: WorkerLogger = WorkerLogger {
-        level: LevelFilter::Debug,
+        // TODO: make configurable.
+        level: LevelFilter::Info,
     };
 
     log::set_logger(&LOGGER)?;
+    // TODO: make configurable, and consistent.
     log::set_max_level(LevelFilter::Info);
     Ok(())
 }

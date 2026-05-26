@@ -34,6 +34,8 @@ thread_local! {
     static GRAPH_COMMS: OnceCell<Rc<futures_intrusive::sync::LocalMutex<GraphComms>>> = const { OnceCell::new() };
 }
 
+/// Post a message to the main UI.
+// TODO: probably should restrict this to only WorkerToMain and WorkerToMainRef.
 pub(crate) fn post_message<T: Serialize + ?Sized>(msg: &T) -> Result<(), JsValue> {
     let msg = serde_wasm_bindgen::to_value(msg)?;
     let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;

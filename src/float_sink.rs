@@ -1,21 +1,16 @@
+//! A sink block that posts the data stream from worker to main UI thread.
 use rustradio::block::{Block, BlockRet};
-use rustradio::stream::{ReadStream, Tag};
+use rustradio::stream::ReadStream;
 use rustradio::{Error, Float};
-use serde::Serialize;
 
-#[derive(Serialize)]
-#[serde(tag = "type", content = "data")]
-enum BorrowedWorkerToMain<'a> {
-    FloatStreams([BorrowedFloatStream<'a>; 1]),
-}
+use crate::FloatStreamRef;
+use crate::WorkerToMainRef;
+use crate::worker::post_message;
 
-#[derive(Serialize)]
-struct BorrowedFloatStream<'a> {
-    name: &'a str,
-    tags: Vec<Tag>,
-    samples: &'a [Float],
-}
-
+/// A block that takes float data from its input and posts it to the main UI
+/// thread.
+///
+/// The stream is identified by its name.
 #[derive(rustradio_macros::Block)]
 #[rustradio(new)]
 pub struct FloatSink {
@@ -24,24 +19,17 @@ pub struct FloatSink {
     src: ReadStream<Float>,
 }
 
-impl FloatSink {
-    fn post_snapshot(&self, samples: &[Float], tags: Vec<Tag>) -> rustradio::Result<()> {
-        crate::worker::post_message(&BorrowedWorkerToMain::FloatStreams([BorrowedFloatStream {
-            name: &self.name,
-            tags,
-            samples,
-        }]))
-        .map_err(|e| Error::msg(format!("post float streams: {e:?}")))?;
-        Ok(())
-    }
-}
-
 impl Block for FloatSink {
     fn work(&mut self) -> rustradio::Result<BlockRet<'_>> {
         let (input, tags) = self.src.read_buf()?;
         let ilen = input.len();
         if ilen > 0 {
-            self.post_snapshot(input.slice(), tags)?;
+            post_message(&WorkerToMainRef::FloatStreams(vec![FloatStreamRef {
+                name: &self.name,
+                tags,
+                samples: input.slice(),
+            }]))
+            .map_err(|e| Error::msg(format!("post float streams: {e:?}")))?;
             input.consume(ilen);
         }
         Ok(BlockRet::WaitForStream(&self.src, 1))
