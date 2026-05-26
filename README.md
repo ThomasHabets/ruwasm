@@ -1,9 +1,36 @@
-# Temporary repo, to be moved into rustradio as an example
+# Temporary repo. This will become rustradio-ui
 
 ```
 ./build-local.sh \
     && ssh example.com "cd /var/www/wasm/ && tar xfz -" < ruwasm.tgz
 ```
+
+## Quick start
+
+Build the `ws_stdout` example from this repo.
+
+```
+cargo build --release --bin ws_stdout
+# binary now in target/release/ws_stdout
+```
+
+Then build the `rtl_data_stream` binary from [rustradio][rustradio] repo.
+
+```
+cargo build -F rtlsdr --release --example rtl_data_stream
+# binary now in target/release/examples/rtl_data_stream
+```
+
+Then start them, locally.
+
+```
+ws_stdout -- rtl_data_stream --freq 144750000
+```
+
+Then go to <https://thomashabets.github.io/ruwasm/>, check the "RTL-SDR unsigned
+8-bit I/Q input" box, click "start rustradio", then "Connect WebSocket stream".
+
+Enjoy the awesomeness.
 
 ## TODO
 
@@ -38,3 +65,5 @@ Don't forget to tick the RTL-SDR format checkbox in the UI.
 ## Useful links
 
 * <https://notes.brooklynzelenka.com/Blog/Notes-on-Writing-Wasm>
+
+[rustradio]: https://github.com/ThomasHabets/rustradio
