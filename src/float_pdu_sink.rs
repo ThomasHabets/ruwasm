@@ -1,7 +1,6 @@
 use rustradio::block::{Block, BlockRet};
 use rustradio::stream::NCReadStream;
 use rustradio::{Error, Float};
-use wasm_bindgen::JsCast;
 
 use crate::{FloatPduStream, WorkerToMain};
 
@@ -16,20 +15,12 @@ pub struct FloatPduSink {
 
 impl FloatPduSink {
     fn post_frame(&self, samples: Vec<Float>) -> rustradio::Result<()> {
-        let scope = web_sys::js_sys::global()
-            .dyn_into::<web_sys::DedicatedWorkerGlobalScope>()
-            .map_err(|e| Error::msg(format!("not in worker scope: {e:?}")))?;
-        scope
-            .post_message(
-                &WorkerToMain::FloatPduStreams(vec![FloatPduStream {
-                    name: self.name.clone(),
-                    sample_rate: self.sample_rate,
-                    samples,
-                }])
-                .try_into()
-                .map_err(|e| Error::msg(format!("serialize float PDU stream: {e:?}")))?,
-            )
-            .map_err(|e| Error::msg(format!("post float PDU stream: {e:?}")))?;
+        crate::worker::post_message(&WorkerToMain::FloatPduStreams(vec![FloatPduStream {
+            name: self.name.clone(),
+            sample_rate: self.sample_rate,
+            samples,
+        }]))
+        .map_err(|e| Error::msg(format!("post float PDU stream: {e:?}")))?;
         Ok(())
     }
 }

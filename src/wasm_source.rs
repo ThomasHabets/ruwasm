@@ -49,7 +49,7 @@ impl WasmSource {
     }
     fn req_more(&mut self) -> Result<()> {
         if !self.outstanding_req {
-            post_message(WorkerToMain::ReqData(ReqData {
+            post_message(&WorkerToMain::ReqData(ReqData {
                 receiver: crate::RECEIVER_SOURCE,
                 pos: self.pos,
                 size: CHUNK_SIZE,

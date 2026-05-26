@@ -9,6 +9,7 @@ use rustradio::graph::GraphRunner;
 use rustradio::stream::ReadStream;
 
 use log::{debug, error, info, trace};
+use serde::Serialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
@@ -33,28 +34,20 @@ thread_local! {
     static GRAPH_COMMS: OnceCell<Rc<futures_intrusive::sync::LocalMutex<GraphComms>>> = const { OnceCell::new() };
 }
 
-pub(crate) fn post_message(msg: WorkerToMain) -> Result<(), JsValue> {
-    let msg = msg.try_into()?;
+pub(crate) fn post_message<T: Serialize + ?Sized>(msg: &T) -> Result<(), JsValue> {
+    let msg = serde_wasm_bindgen::to_value(msg)?;
     let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
     scope.post_message(&msg)
 }
 
 /// Handle message sent from Main thread to worker.
 async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
-    let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
     match event.data().try_into()? {
         MainToWorker::Start { samp_rate, rtlsdr } => {
             debug!("Got MainToWorker::Start");
             // Run the decoder.
-            let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
             let o = radio_1200(samp_rate, rtlsdr).await?;
-            scope
-                .post_message(
-                    &WorkerToMain::Result(o)
-                        .try_into()
-                        .expect("failed to serialize"),
-                )
-                .expect("failed to post message");
+            post_message(&WorkerToMain::Result(o))?;
         }
         MainToWorker::Data(id, data) => {
             trace!("Worker: Got data on {id:?} len {}", data.len());
@@ -93,9 +86,7 @@ async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
         }
         MainToWorker::Ping(t) => {
             info!("Worker: Got ping");
-            scope
-                .post_message(&WorkerToMain::Pong(t).try_into().unwrap())
-                .expect("worker failed to send pong");
+            post_message(&WorkerToMain::Pong(t))?;
         }
         MainToWorker::Pong(from) => {
             let to = js_performance_now();
@@ -137,7 +128,7 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
     global.set_onmessageerror(Some(onmsgerr.as_ref().unchecked_ref()));
     onmsgerr.forget();
 
-    global.post_message(&WorkerToMain::Ready.try_into()?)?;
+    post_message(&WorkerToMain::Ready)?;
     info!("Done setting up worker");
 
     Ok(())
