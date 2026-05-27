@@ -33,6 +33,7 @@ extern "C" {
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ReceiverId(u64);
 
+/// Stream of floats going between worker and UI thread.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, PartialOrd)]
 pub struct FloatStream {
     pub name: String,
@@ -40,7 +41,11 @@ pub struct FloatStream {
     pub samples: Vec<rustradio::Float>,
 }
 
-/// Borrow version of FloatStream.
+/// Borrow version of `FloatStream`.
+///
+/// Used to avoid copies when e.g. sending directly from a RustRadio stream.
+///
+/// Must serialize the same as `FloatStream`.
 #[derive(Serialize)]
 struct FloatStreamRef<'a> {
     name: &'a str,
@@ -56,7 +61,9 @@ pub struct ComplexStream {
     pub samples: Vec<rustradio::Complex>,
 }
 
-/// Borrow version of ComplexStream, for less copying.
+/// Borrow version of `ComplexStream`.
+///
+/// Used to avoid copies when e.g. sending directly from a RustRadio stream.
 ///
 /// Must serialize the same as `ComplexStream`.
 #[derive(Serialize)]
@@ -66,6 +73,12 @@ struct ComplexStreamRef<'a> {
     samples: &'a [rustradio::Complex],
 }
 
+/// Stream of PDUs of floats for sending between worker and main UI.
+///
+/// This is used by the frequency and waterfall sinks.
+///
+/// There's currently no borrow version of `FloatPduStream`, since PDUs are
+/// generally passed by value anyway. If a need comes up, it can be added.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, PartialOrd)]
 pub struct FloatPduStream {
     pub name: String,
