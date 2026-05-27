@@ -1,21 +1,24 @@
 use std::cell::OnceCell;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use rustradio::blockchain;
 #[allow(clippy::wildcard_imports)]
 use rustradio::blocks::*;
+use rustradio::data_stream::DataStreamId;
 use rustradio::graph::GraphRunner;
 use rustradio::stream::ReadStream;
 
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
-use crate::ReceiverId;
+use crate::data_stream::{DataStream, Event as DataStreamEvent, RequestState};
 use crate::js_performance_now;
+use crate::receiver_source;
 use crate::wasm_source;
 use crate::{MainToWorker, WorkerToMain};
 
@@ -25,13 +28,15 @@ const IF_SAMPLE_RATE: usize = 50_000;
 const VIZ_SAMPLE_RATE: usize = 1_000;
 const SPECTRUM_SIZE: usize = 1024;
 
+/// Channels used to pass source data into a running graph.
 struct GraphComms {
-    src: HashMap<ReceiverId, async_channel::Sender<crate::wasm_source::Msg>>,
+    src: HashMap<DataStreamId, async_channel::Sender<crate::wasm_source::Msg>>,
     graph: async_channel::Sender<()>,
 }
 
 thread_local! {
     static GRAPH_COMMS: OnceCell<Rc<futures_intrusive::sync::LocalMutex<GraphComms>>> = const { OnceCell::new() };
+    static DATA_STREAM: RefCell<DataStream> = RefCell::new(DataStream::new());
 }
 
 /// Post a message to the main UI.
@@ -40,6 +45,99 @@ pub(crate) fn post_message<T: Serialize + ?Sized>(msg: &T) -> Result<(), JsValue
     let msg = serde_wasm_bindgen::to_value(msg)?;
     let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
     scope.post_message(&msg)
+}
+
+/// Send one control or data message to the graph source for a receiver.
+async fn send_source_msg(id: DataStreamId, msg: wasm_source::Msg) -> Result<(), JsValue> {
+    let Some(comms) = GRAPH_COMMS.with(|cell| {
+        let cell = cell.clone();
+        cell.get().map(Clone::clone)
+    }) else {
+        warn!("Worker: graph comms not ready for {id}");
+        return Ok(());
+    };
+
+    let Some((src, graph)) = ({
+        let comms = comms.lock().await;
+        comms
+            .src
+            .get(&id)
+            .map(|src| (src.clone(), comms.graph.clone()))
+    }) else {
+        warn!("Worker: no receiver registered for {id}");
+        return Ok(());
+    };
+
+    src.send(msg)
+        .await
+        .map_err(|e| JsValue::from_str(&format!("source receiver send failed: {e:?}")))?;
+    graph
+        .send(())
+        .await
+        .map_err(|e| JsValue::from_str(&format!("graph bump send failed: {e:?}")))?;
+    Ok(())
+}
+
+/// Request more bytes for a WasmSource through the DATA_STREAM protocol.
+pub(crate) fn request_receiver_data(
+    receiver: &DataStreamId,
+    _pos: u64,
+    size: u64,
+) -> rustradio::Result<()> {
+    let request_state = DATA_STREAM.with(|data_stream| {
+        data_stream
+            .borrow_mut()
+            .request_data(receiver, size as usize)
+    })?;
+
+    match request_state {
+        RequestState::Waiting => Ok(()),
+        RequestState::Issued(packet) => {
+            post_message(&WorkerToMain::DataStream(packet))
+                .map_err(|e| rustradio::Error::msg(format!("{e:?}")))?;
+            Ok(())
+        }
+    }
+}
+
+/// Apply inbound DATA_STREAM bytes from main or WebSocket to graph sources.
+async fn handle_data_stream_bytes(data: &[u8]) -> Result<(), JsValue> {
+    if data.is_empty() {
+        let receivers = DATA_STREAM.with(|data_stream| data_stream.borrow_mut().disconnect());
+        let receivers = if receivers.is_empty() {
+            vec![receiver_source()]
+        } else {
+            receivers
+        };
+        for receiver in receivers {
+            send_source_msg(receiver, wasm_source::Msg::Eof).await?;
+        }
+        return Ok(());
+    }
+
+    // TODO: can we create borrowed events instead of copying them?
+    let events = DATA_STREAM
+        .with(|data_stream| data_stream.borrow_mut().handle_bytes(data))
+        .map_err(|e| JsValue::from_str(&format!("{e:?}")))?;
+
+    for event in events {
+        match event {
+            DataStreamEvent::PeerReady => {
+                let receivers = DATA_STREAM.with(|data_stream| data_stream.borrow().receivers());
+                for receiver in receivers {
+                    send_source_msg(receiver, wasm_source::Msg::RetryRequest).await?;
+                }
+            }
+            DataStreamEvent::Data { receiver, data } => {
+                send_source_msg(receiver, wasm_source::Msg::Extend(data)).await?;
+            }
+            DataStreamEvent::Eof { receiver } => {
+                send_source_msg(receiver, wasm_source::Msg::Eof).await?;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Handle message sent from Main thread to worker.
@@ -51,40 +149,9 @@ async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
             let o = radio_1200(samp_rate, rtlsdr).await?;
             post_message(&WorkerToMain::Result(o))?;
         }
-        MainToWorker::Data(id, data) => {
-            trace!("Worker: Got data on {id:?} len {}", data.len());
-            GRAPH_COMMS.with(|cell| {
-                let cell = cell.clone();
-                let comms = cell.get().unwrap().clone();
-                spawn_local(async move {
-                    let comms = comms.lock().await;
-                    comms.src[&id]
-                        .send(wasm_source::Msg::Extend(data))
-                        .await
-                        .expect("Worker failed to send data to the wasm source");
-                    comms
-                        .graph
-                        .send(())
-                        .await
-                        .expect("Worker failed to send bump to graph");
-                });
-            });
-            trace!("Worker data message processing done");
-        }
-        MainToWorker::Eof(id) => {
-            info!("Worker: Got EOF on {id:?}");
-            // TODO: use the ID.
-            GRAPH_COMMS.with(|cell| {
-                let cell = cell.clone();
-                let comms = cell.get().unwrap().clone();
-                spawn_local(async move {
-                    //let mut comms: &mut GraphComms = &mut RefCell::borrow_mut(&comms);
-                    let comms = comms.lock().await;
-                    //let mut comms = comms.borrow_mut();
-                    comms.src[&id].send(wasm_source::Msg::Eof).await.unwrap();
-                    comms.graph.send(()).await.unwrap();
-                });
-            });
+        MainToWorker::DataStream(data) => {
+            trace!("Worker: Got DATA_STREAM bytes len {}", data.len());
+            handle_data_stream_bytes(&data).await?;
         }
         MainToWorker::Ping(t) => {
             info!("Worker: Got ping");
@@ -140,6 +207,7 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
 ///
 /// The input comes in via GraphComms into the WasmSource block, so this
 /// function doesn't return until an EOF has come in.
+#[allow(clippy::too_many_lines)]
 async fn radio_1200(samp_rate: u64, rtlsdr: bool) -> rustradio::Result<String> {
     info!("AX.25 1200 decoder running");
 
@@ -219,13 +287,18 @@ async fn radio_1200(samp_rate: u64, rtlsdr: bool) -> rustradio::Result<String> {
     ];
 
     let (tx, rx) = async_channel::bounded(SOURCE_CHANNEL_SIZE);
+    DATA_STREAM.with(|data_stream| {
+        data_stream
+            .borrow_mut()
+            .register_receiver(receiver_source());
+    });
     GRAPH_COMMS.with(|cell| {
         cell.get_or_init(move || {
             // Need `is_fair` to be set, because data packets need to come in
             // order.
             Rc::new(futures_intrusive::sync::LocalMutex::new(
                 GraphComms {
-                    src: [(crate::RECEIVER_SOURCE, src_tx)].into_iter().collect(),
+                    src: [(receiver_source(), src_tx)].into_iter().collect(),
                     graph: tx,
                 },
                 true,

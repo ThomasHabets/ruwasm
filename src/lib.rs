@@ -6,11 +6,13 @@
 #![allow(clippy::cast_possible_truncation)]
 // TODO: fix some of the above
 use log::info;
+use rustradio::data_stream::DataStreamId;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 mod complex_sink;
 mod constellation_sink;
+mod data_stream;
 mod domlogger;
 mod float_pdu_sink;
 mod float_sink;
@@ -22,16 +24,18 @@ mod wasm_source;
 mod worker;
 mod workerlogger;
 
-const RECEIVER_SOURCE: ReceiverId = ReceiverId(0);
+pub(crate) const RECEIVER_SOURCE_ID: &str = "rtl-sdr";
+
+/// Return the DATA_STREAM id used by the single input source receiver.
+pub(crate) fn receiver_source() -> DataStreamId {
+    DataStreamId::new(RECEIVER_SOURCE_ID)
+}
 
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = performance, js_name = now)]
     fn js_performance_now() -> f64;
 }
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ReceiverId(u64);
 
 /// Stream of floats going between worker and UI thread.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, PartialOrd)]
@@ -93,11 +97,8 @@ enum MainToWorker {
     /// Start the graph with the selected input byte format.
     Start { samp_rate: u64, rtlsdr: bool },
 
-    /// Data going to a WasmSource or something.
-    Data(ReceiverId, Vec<u8>),
-
-    /// Inform that stream has ended.
-    Eof(ReceiverId),
+    /// Raw DATA_STREAM protocol bytes received from the selected input source.
+    DataStream(Vec<u8>),
 
     /// Send a ping with a `performance.now()` timestamp.
     /// The timestamp will be reflected in the Pong.
@@ -123,15 +124,6 @@ impl TryFrom<wasm_bindgen::JsValue> for MainToWorker {
     }
 }
 
-/// Named payload for worker data requests, sent across the worker/main boundary
-/// so the UI thread can route a receiver read to either file or stream input.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
-struct ReqData {
-    receiver: ReceiverId,
-    pos: u64,
-    size: u64,
-}
-
 /// Messages from the worker to the main (UI) thread.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
@@ -149,8 +141,8 @@ enum WorkerToMain {
     /// Original ping timestamp is returned.
     Pong(f64),
 
-    /// Request more data.
-    ReqData(ReqData),
+    /// Raw DATA_STREAM protocol bytes to send to the selected input source.
+    DataStream(Vec<u8>),
 
     /// At the end of execution, provide the result as a string.
     Result(String),

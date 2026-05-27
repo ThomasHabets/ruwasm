@@ -1,12 +1,15 @@
 // This file is for stuff in the main (UI) thread.
 
+use std::cell::Cell;
 use std::cell::OnceCell;
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use log::{debug, error, info, warn};
-use rustradio::data_stream::{BytesReader, DataStreamId, PROTOCOL_VERSION, Packet, SyncWriter};
+use rustradio::data_stream::{
+    BytesReader, DataStreamId, PROTOCOL_VERSION, Packet, RequestData, SyncWriter,
+};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::js_sys;
@@ -16,10 +19,8 @@ use web_sys::{
 };
 
 use crate::FloatStream;
-use crate::RECEIVER_SOURCE;
 use crate::js_performance_now;
 use crate::{MainToWorker, WorkerToMain};
-use crate::{ReceiverId, ReqData};
 
 const HTML_DISABLED: &str = "disabled";
 const ID_RESULT: &str = "result";
@@ -32,9 +33,6 @@ const ID_WS_CONNECT: &str = "btn-ws-connect";
 const ID_ADD: &str = "btn-add";
 const ID_PING: &str = "btn-ping";
 const ID_HTML: &str = "root-html";
-const WS_STREAM_ID: &str = "rtl-sdr";
-const WS_WINDOW_BYTES: usize = 64 * 1024;
-const WS_MAX_PACKET_LEN: usize = WS_WINDOW_BYTES + 4096;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum InputSource {
@@ -43,41 +41,17 @@ enum InputSource {
     WebSocket,
 }
 
-// The chunkiness makes for less copying.
-//
-// TODO: But a better solution would be to be to borrow the data, and let it be
-// borrowed until serialized and sent by post_message. That way we're not
-// restricted by the chunkiness of the websocket incoming data.
-struct WebSocketSourceState {
-    chunks: VecDeque<Vec<u8>>,
-    queued_bytes: usize,
-    reader: BytesReader,
-    peer_version_seen: bool,
-    eof: bool,
-}
-
-impl WebSocketSourceState {
-    /// Build the per-stream buffer used between WebSocket callbacks and the
-    /// worker's pull-based data requests.
-    fn new() -> Self {
-        Self {
-            chunks: VecDeque::new(),
-            queued_bytes: 0,
-            reader: BytesReader::new().with_max_packet_len(WS_MAX_PACKET_LEN),
-            peer_version_seen: false,
-            eof: false,
-        }
-    }
-}
-
 thread_local! {
     static WORKER: OnceCell<Worker> = const { OnceCell::new() };
     static LATEST_FLOAT_STREAMS: RefCell<Vec<FloatStream>> = const { RefCell::new(Vec::new()) };
     static FILE: RefCell<Option<File>> = const { RefCell::new(None) };
+    static FILE_DATA_STREAM_READER: RefCell<BytesReader> = RefCell::new(BytesReader::new());
+    static FILE_DATA_STREAM_VERSION_SENT: Cell<bool> = const { Cell::new(false) };
+    static FILE_DATA_STREAM_PEER_VERSION_SEEN: Cell<bool> = const { Cell::new(false) };
+    static FILE_DATA_STREAM_POS: RefCell<HashMap<DataStreamId, u64>> = RefCell::new(HashMap::new());
     static INPUT_SOURCE: RefCell<InputSource> = const { RefCell::new(InputSource::None) };
-    static PENDING_DATA_REQUEST: RefCell<Option<ReqData>> = const { RefCell::new(None) };
+    static PENDING_WORKER_DATA_STREAM: RefCell<Vec<Vec<u8>>> = const { RefCell::new(Vec::new()) };
     static WS_SOCKET: RefCell<Option<WebSocket>> = const { RefCell::new(None) };
-    static WS_SOURCE_STATE: RefCell<WebSocketSourceState> = RefCell::new(WebSocketSourceState::new());
 }
 
 pub(crate) fn post_message(msg: MainToWorker) -> Result<(), JsValue> {
@@ -95,62 +69,173 @@ async fn read_data(start: u64, size: u64) -> Result<Vec<u8>, JsValue> {
     Ok(Uint8Array::new(&buf).to_vec())
 }
 
-/// Route the worker's pull-based input request to the browser-side source
-/// selected by the user, or park it until a source is selected.
-async fn handle_data_request(req: ReqData) -> Result<(), JsValue> {
+/// Convert file-supplier protocol errors into browser callback errors.
+fn file_data_stream_error(err: impl std::fmt::Display) -> JsValue {
+    JsValue::from_str(&format!("DATA_STREAM file input error: {err}"))
+}
+
+/// Return whether the next file-supplier packet must include Version.
+fn take_file_data_stream_needs_version() -> bool {
+    FILE_DATA_STREAM_VERSION_SENT.with(|slot| {
+        if slot.get() {
+            false
+        } else {
+            slot.set(true);
+            true
+        }
+    })
+}
+
+/// Send the file supplier's DATA_STREAM Version packet to the worker.
+fn send_file_data_stream_version() -> Result<(), JsValue> {
+    if !take_file_data_stream_needs_version() {
+        return Ok(());
+    }
+
+    let mut packet = Vec::new();
+    SyncWriter::new(&mut packet)
+        .write_version()
+        .map_err(file_data_stream_error)?;
+    post_message(MainToWorker::DataStream(packet))
+}
+
+/// Send one DATA_STREAM Data packet from the selected file to the worker.
+fn send_file_data_stream_data(stream_id: &DataStreamId, data: &[u8]) -> Result<(), JsValue> {
+    let mut packet = Vec::new();
+    {
+        let mut writer = SyncWriter::new(&mut packet);
+        if take_file_data_stream_needs_version() {
+            writer.write_version().map_err(file_data_stream_error)?;
+        }
+        writer
+            .write_data(stream_id, data)
+            .map_err(file_data_stream_error)?;
+    }
+    debug!(
+        "Main: sending {} file input byte(s) to worker over DATA_STREAM",
+        data.len()
+    );
+    post_message(MainToWorker::DataStream(packet))
+}
+
+/// Clear all file-supplier protocol state for a new selected file.
+fn reset_file_data_stream_state() {
+    FILE_DATA_STREAM_READER.with(|slot| slot.borrow_mut().clear());
+    FILE_DATA_STREAM_VERSION_SENT.with(|slot| slot.set(false));
+    FILE_DATA_STREAM_PEER_VERSION_SEEN.with(|slot| slot.set(false));
+    FILE_DATA_STREAM_POS.with(|slot| slot.borrow_mut().clear());
+}
+
+/// Feed worker protocol bytes into the file supplier parser.
+fn append_file_data_stream_bytes(data: &[u8]) -> Result<Vec<Packet>, JsValue> {
+    FILE_DATA_STREAM_READER.with(|slot| {
+        let mut reader = slot.borrow_mut();
+        reader.push_bytes(data);
+        let mut packets = Vec::new();
+
+        loop {
+            let Some(packet) = reader.read_packet().map_err(file_data_stream_error)? else {
+                break;
+            };
+            packets.push(packet);
+        }
+
+        Ok(packets)
+    })
+}
+
+/// Satisfy one worker RequestData packet by reading bytes from the selected file.
+async fn satisfy_file_data_request(req: RequestData) -> Result<(), JsValue> {
+    let pos = FILE_DATA_STREAM_POS.with(|slot| {
+        let positions = slot.borrow();
+        *positions.get(&req.stream_id).unwrap_or(&0)
+    });
+    // TODO: Confirm that we're reading the right file.
+    let data = read_data(pos, req.window as u64).await?;
+    FILE_DATA_STREAM_POS.with(|slot| {
+        slot.borrow_mut()
+            .insert(req.stream_id.clone(), pos + data.len() as u64);
+    });
+    send_file_data_stream_data(&req.stream_id, &data)
+}
+
+/// Apply one worker DATA_STREAM packet to the file supplier state.
+async fn handle_file_data_stream_packet(packet: Packet) -> Result<(), JsValue> {
+    match packet {
+        Packet::Version(PROTOCOL_VERSION) => {
+            info!("DataStream protocol version accepted");
+            FILE_DATA_STREAM_PEER_VERSION_SEEN.with(|slot| slot.set(true));
+            Ok(())
+        }
+        Packet::Version(version) => Err(file_data_stream_error(format!(
+            "unsupported protocol version {version}"
+        ))),
+        Packet::RequestData(req) => {
+            if !FILE_DATA_STREAM_PEER_VERSION_SEEN.with(std::cell::Cell::get) {
+                return Err(file_data_stream_error(
+                    "peer sent RequestData before Version packet",
+                ));
+            }
+            satisfy_file_data_request(req).await
+        }
+        Packet::Data(data) => Err(file_data_stream_error(format!(
+            "unexpected Data packet for {} with {} byte(s)",
+            data.stream_id,
+            data.data.len()
+        ))),
+    }
+}
+
+/// Decode and handle all complete DATA_STREAM packets sent by the worker.
+async fn handle_file_data_stream_bytes(data: &[u8]) -> Result<(), JsValue> {
+    for packet in append_file_data_stream_bytes(data)? {
+        handle_file_data_stream_packet(packet).await?;
+    }
+    Ok(())
+}
+
+/// Route worker DATA_STREAM bytes to the active input source.
+async fn handle_worker_data_stream(data: Vec<u8>) -> Result<(), JsValue> {
+    route_worker_data_stream(data).await
+}
+
+/// Hold worker protocol bytes until an input source can receive them.
+fn store_pending_worker_data_stream(data: Vec<u8>) {
+    PENDING_WORKER_DATA_STREAM.with(|slot| slot.borrow_mut().push(data));
+}
+
+/// Take all worker protocol bytes held while waiting for source setup.
+fn take_pending_worker_data_stream() -> Vec<Vec<u8>> {
+    PENDING_WORKER_DATA_STREAM.with(|slot| std::mem::take(&mut *slot.borrow_mut()))
+}
+
+/// Replay held worker protocol bytes into the now-active input source.
+async fn flush_pending_worker_data_stream() -> Result<(), JsValue> {
+    for data in take_pending_worker_data_stream() {
+        route_worker_data_stream(data).await?;
+    }
+    Ok(())
+}
+
+/// Deliver worker protocol bytes or queue them until the source is ready.
+async fn route_worker_data_stream(data: Vec<u8>) -> Result<(), JsValue> {
     match input_source() {
-        InputSource::File => satisfy_file_request(req).await,
-        InputSource::WebSocket => satisfy_websocket_request(req),
+        InputSource::File => handle_file_data_stream_bytes(&data).await,
+        InputSource::WebSocket if websocket_is_open() => websocket_send_bytes(&data),
+        InputSource::WebSocket => {
+            info!("Main: waiting for websocket open before routing DATA_STREAM bytes");
+            store_pending_worker_data_stream(data);
+            Ok(())
+        }
         InputSource::None => {
-            info!("Main: waiting for an input source before satisfying data request");
-            store_pending_request(req);
+            info!("Main: waiting for an input source before routing DATA_STREAM bytes");
+            store_pending_worker_data_stream(data);
             Ok(())
         }
     }
 }
 
-/// Serve a receiver read from the selected capture file using the worker's
-/// requested byte range.
-async fn satisfy_file_request(req: ReqData) -> Result<(), JsValue> {
-    let data = read_data(req.pos, req.size).await?;
-    send_data_or_eof(req.receiver, data)
-}
-
-/// Serve a receiver read from queued WebSocket chunks, or remember the request
-/// until the next chunk or close event can answer it.
-fn satisfy_websocket_request(req: ReqData) -> Result<(), JsValue> {
-    let msg = WS_SOURCE_STATE.with(|slot| {
-        let mut state = slot.borrow_mut();
-        if let Some(data) = state.chunks.pop_front() {
-            state.queued_bytes = state.queued_bytes.saturating_sub(data.len());
-            Some(MainToWorker::Data(req.receiver, data))
-        } else if state.eof {
-            Some(MainToWorker::Eof(req.receiver))
-        } else {
-            store_pending_request(req);
-            None
-        }
-    });
-    if let Some(msg) = msg {
-        post_message(msg)?;
-    }
-    refresh_websocket_window()?;
-    Ok(())
-}
-
-/// Convert browser input bytes into the data/EOF messages expected by the
-/// worker-side source block.
-fn send_data_or_eof(rcv: ReceiverId, data: Vec<u8>) -> Result<(), JsValue> {
-    if data.is_empty() {
-        post_message(MainToWorker::Eof(rcv))
-    } else {
-        debug!("Main: sending {} input byte(s) to worker", data.len());
-        post_message(MainToWorker::Data(rcv, data))
-    }
-}
-
-/// Read the active input source for request handlers and async browser
-/// callbacks.
+/// Read the active input source for async browser callbacks.
 fn input_source() -> InputSource {
     INPUT_SOURCE.with(|source| *source.borrow())
 }
@@ -175,89 +260,15 @@ fn clear_input_source() {
     INPUT_SOURCE.with(|slot| *slot.borrow_mut() = InputSource::None);
 }
 
-/// Keep the worker's outstanding request while the main thread waits for user
-/// source selection or for a streaming WebSocket chunk.
-fn store_pending_request(req: ReqData) {
-    PENDING_DATA_REQUEST.with(|pending| *pending.borrow_mut() = Some(req));
-}
-
-/// Take the parked worker request so exactly one later source event satisfies
-/// it.
-fn take_pending_request() -> Option<ReqData> {
-    PENDING_DATA_REQUEST.with(|pending| pending.borrow_mut().take())
-}
-
-/// Clear WebSocket buffering for a newly selected stream before callbacks begin
-/// appending chunks.
-fn reset_websocket_state() {
-    WS_SOURCE_STATE.with(|slot| *slot.borrow_mut() = WebSocketSourceState::new());
-}
-
-/// Feed a WebSocket payload into the worker-facing stream, satisfying a parked
-/// request immediately when the graph is waiting for bytes.
-fn queue_websocket_data(data: Vec<u8>) -> Result<(), JsValue> {
-    if data.is_empty() {
-        return Ok(());
-    }
-    if input_source() != InputSource::WebSocket {
-        return Ok(());
-    }
-    if data.len() > WS_WINDOW_BYTES {
-        warn!("websocket input packet exceeded receive window. Dropping");
-        return Ok(());
-        /*
-        return Err(JsValue::from_str(
-            "websocket input packet exceeded receive window",
-        ));
-        */
-    }
-
-    if let Some(req) = take_pending_request() {
-        send_data_or_eof(req.receiver, data)?;
-    } else {
-        WS_SOURCE_STATE.with(|slot| {
-            let mut state = slot.borrow_mut();
-            let new_queued_bytes = state
-                .queued_bytes
-                .checked_add(data.len())
-                .ok_or_else(|| JsValue::from_str("websocket input queue length overflow"))?;
-            if new_queued_bytes > WS_WINDOW_BYTES {
-                warn!("websocket input queued bytes exceeded receive window. Dropping.");
-                if false {
-                    return Err(JsValue::from_str(
-                        "websocket input queued bytes exceeded receive window",
-                    ));
-                }
-                return Ok(());
-            }
-            state.queued_bytes = new_queued_bytes;
-            state.chunks.push_back(data);
-            Ok(())
-        })?;
-    }
-    Ok(())
-}
-
-/// Mark the WebSocket input complete and wake any parked request with EOF so
-/// the worker graph can drain.
-fn mark_websocket_eof() -> Result<(), JsValue> {
-    WS_SOURCE_STATE.with(|slot| slot.borrow_mut().eof = true);
-    if let Some(req) = take_pending_request() {
-        post_message(MainToWorker::Eof(req.receiver))?;
-    }
-    Ok(())
-}
-
-/// Convert rustradio DATA_STREAM errors into JS errors with enough context to
-/// identify the WebSocket protocol layer.
-fn data_stream_error(err: impl std::fmt::Display) -> JsValue {
-    JsValue::from_str(&format!("DATA_STREAM websocket error: {err}"))
-}
-
-/// Return the protocol stream name ruwasm currently expects from WebSocket
-/// producers.
-fn websocket_stream_id() -> DataStreamId {
-    DataStreamId::new(WS_STREAM_ID)
+/// Return whether the browser WebSocket can currently accept bytes.
+fn websocket_is_open() -> bool {
+    WS_SOCKET.with(|slot| {
+        let socket = slot.borrow();
+        match socket.as_ref() {
+            Some(ws) => ws.ready_state() == WebSocket::OPEN,
+            None => false,
+        }
+    })
 }
 
 /// Send one serialized DATA_STREAM packet over the browser WebSocket.
@@ -271,133 +282,8 @@ fn websocket_send_bytes(data: &[u8]) -> Result<(), JsValue> {
     })
 }
 
-/// Start the DATA_STREAM handshake from the browser side once the WebSocket
-/// transport is open.
-fn websocket_write_version() -> Result<(), JsValue> {
-    let mut packet = Vec::new();
-    SyncWriter::new(&mut packet)
-        .write_version()
-        .map_err(data_stream_error)?;
-    websocket_send_bytes(&packet)
-}
-
-/// Advertise the current receive window to the WebSocket producer so it knows
-/// how many more bytes it may send.
-fn websocket_write_request_data(window: usize) -> Result<(), JsValue> {
-    if !websocket_peer_version_seen() {
-        return Ok(());
-    }
-
-    let mut packet = Vec::new();
-    let stream_id = websocket_stream_id();
-    SyncWriter::new(&mut packet)
-        .write_request_data(&stream_id, window)
-        .map_err(data_stream_error)?;
-    debug!("Main: requesting DATA_STREAM window {window} for {stream_id}");
-    websocket_send_bytes(&packet)
-}
-
-/// Track whether the peer has completed its side of the DATA_STREAM version
-/// handshake.
-fn websocket_peer_version_seen() -> bool {
-    WS_SOURCE_STATE.with(|slot| slot.borrow().peer_version_seen)
-}
-
-/// Compute remaining main-thread buffering capacity for DATA_STREAM flow
-/// control.
-fn websocket_available_window() -> usize {
-    WS_SOURCE_STATE.with(|slot| {
-        let state = slot.borrow();
-        WS_WINDOW_BYTES.saturating_sub(state.queued_bytes)
-    })
-}
-
-/// Re-publish the receive window after bytes move from the main-thread queue
-/// into the worker.
-fn refresh_websocket_window() -> Result<(), JsValue> {
-    if input_source() != InputSource::WebSocket {
-        return Ok(());
-    }
-    if WS_SOURCE_STATE.with(|slot| slot.borrow().eof) {
-        return Ok(());
-    }
-    websocket_write_request_data(websocket_available_window())
-}
-
-/// Push incoming WebSocket bytes into rustradio's chunk-oriented DATA_STREAM
-/// parser and drain all complete packets now available.
-fn append_websocket_protocol_bytes(data: &[u8]) -> Result<Vec<Packet>, JsValue> {
-    WS_SOURCE_STATE.with(|slot| {
-        let mut state = slot.borrow_mut();
-        state.reader.push_bytes(data);
-        let mut packets = Vec::new();
-
-        loop {
-            let Some(packet) = state.reader.read_packet().map_err(data_stream_error)? else {
-                break;
-            };
-            packets.push(packet);
-        }
-
-        Ok(packets)
-    })
-}
-
-/// Record that the peer version is accepted, update the UI, and issue the first
-/// receive window.
-fn mark_websocket_peer_version_seen() -> Result<(), JsValue> {
-    WS_SOURCE_STATE.with(|slot| slot.borrow_mut().peer_version_seen = true);
-    set_content(
-        ID_RESULT,
-        "WebSocket DATA_STREAM connected. Waiting for samples…",
-    )?;
-    refresh_websocket_window()
-}
-
-/// Apply a parsed DATA_STREAM packet to ruwasm's source state, accepting only
-/// the protocol messages expected from the producer.
-fn handle_websocket_protocol_packet(packet: Packet) -> Result<(), JsValue> {
-    match packet {
-        Packet::Version(PROTOCOL_VERSION) => {
-            info!("Main: DATA_STREAM websocket peer version accepted");
-            mark_websocket_peer_version_seen()
-        }
-        Packet::Version(version) => Err(data_stream_error(format!(
-            "unsupported protocol version {version}",
-        ))),
-        Packet::Data(data) => {
-            if data.stream_id.as_str() != WS_STREAM_ID {
-                return Err(data_stream_error(format!(
-                    "unexpected DATA_STREAM id {}, want {WS_STREAM_ID}",
-                    data.stream_id,
-                )));
-            }
-            queue_websocket_data(data.data)
-        }
-        Packet::RequestData(req) => Err(data_stream_error(format!(
-            "unexpected RequestData packet for {} with window {}",
-            req.stream_id, req.window,
-        ))),
-    }
-}
-
-/// Decode all complete DATA_STREAM packets carried by a WebSocket message and
-/// feed data packets into the worker-facing source queue.
-fn handle_websocket_protocol_bytes(data: &[u8]) -> Result<(), JsValue> {
-    if input_source() != InputSource::WebSocket {
-        return Ok(());
-    }
-    for packet in append_websocket_protocol_bytes(data)? {
-        if !matches!(packet, Packet::Version(_)) && !websocket_peer_version_seen() {
-            return Err(data_stream_error("peer sent data before Version packet"));
-        }
-        handle_websocket_protocol_packet(packet)?;
-    }
-    Ok(())
-}
-
-/// Surface a protocol failure and close the WebSocket so the worker sees EOF
-/// through the normal close path.
+/// Surface a WebSocket relay failure and close the socket so the worker sees
+/// EOF through the normal close path.
 fn close_websocket_after_error(err: &JsValue) {
     error!("Main: websocket DATA_STREAM error: {err:?}");
     let _ = set_content(ID_RESULT, "WebSocket DATA_STREAM protocol error.");
@@ -411,9 +297,12 @@ fn close_websocket_after_error(err: &JsValue) {
 /// Handle message sent from the worker.
 async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
     match e.data().try_into()? {
-        WorkerToMain::ReqData(req) => {
-            debug!("Main: received WorkerToMain::ReqData");
-            handle_data_request(req).await?;
+        WorkerToMain::DataStream(data) => {
+            debug!(
+                "Main: handling {} DATA_STREAM byte(s) from worker",
+                data.len()
+            );
+            handle_worker_data_stream(data).await?;
         }
         WorkerToMain::Ready => {
             info!("Main: Received WorkerToMain::Ready");
@@ -544,7 +433,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
         // TODO: make some sort of UI friendly bounded channel. Don't want it to
         // block.
         info!("Main: installing file chunk handler");
-        install_file_chunk_listener(RECEIVER_SOURCE, input)?; // 64 KiB chunks
+        install_file_chunk_listener(input)?; // 64 KiB chunks
     }
 
     // Set up websocket input.
@@ -681,7 +570,7 @@ WASM built by Rust version: {}",
     Ok(())
 }
 
-fn install_file_chunk_listener(_id: ReceiverId, input: HtmlInputElement) -> Result<(), JsValue> {
+fn install_file_chunk_listener(input: HtmlInputElement) -> Result<(), JsValue> {
     info!("Adding listener");
     let input = Rc::new(input);
     let input2 = input.clone();
@@ -703,13 +592,18 @@ fn install_file_chunk_listener(_id: ReceiverId, input: HtmlInputElement) -> Resu
             FILE.with(|slot| {
                 *slot.borrow_mut() = Some(file);
             });
-            if let Some(req) = take_pending_request() {
-                spawn_local(async move {
-                    if let Err(e) = satisfy_file_request(req).await {
-                        error!("Main: failed to read selected file: {e:?}");
-                    }
-                });
-            }
+            reset_file_data_stream_state();
+            spawn_local(async {
+                let result = async {
+                    flush_pending_worker_data_stream().await?;
+                    send_file_data_stream_version()
+                }
+                .await;
+                if let Err(e) = result {
+                    error!("Main: failed to start file DATA_STREAM input: {e:?}");
+                    let _ = set_content(ID_RESULT, "File DATA_STREAM protocol error.");
+                }
+            });
             Ok(())
         }));
 
@@ -720,11 +614,10 @@ fn install_file_chunk_listener(_id: ReceiverId, input: HtmlInputElement) -> Resu
     Ok(())
 }
 
-/// Start the WebSocket input path from the UI button by claiming the source,
-/// resetting stream state, and connecting the browser socket.
+/// Start the WebSocket input path from the UI button by claiming the source and
+/// connecting the browser socket.
 fn start_websocket_source(url: &str) -> Result<(), JsValue> {
     select_input_source(InputSource::WebSocket)?;
-    reset_websocket_state();
     match connect_websocket(url) {
         Ok(()) => {
             disable_input_selectors()?;
@@ -738,8 +631,8 @@ fn start_websocket_source(url: &str) -> Result<(), JsValue> {
     }
 }
 
-/// Own the browser WebSocket and wire its lifecycle callbacks into the same
-/// worker data/EOF flow used by file input.
+/// Own the browser WebSocket and relay DATA_STREAM bytes between the socket and
+/// worker.
 fn connect_websocket(url: &str) -> Result<(), JsValue> {
     let ws = WebSocket::new(url)?;
     ws.set_binary_type(BinaryType::Arraybuffer);
@@ -751,11 +644,12 @@ fn connect_websocket(url: &str) -> Result<(), JsValue> {
         let url = url.to_string();
         let onopen = Closure::<dyn FnMut(Event)>::new(move |_event: Event| {
             info!("Main: websocket input connected to {url}");
-            if let Err(e) = websocket_write_version() {
-                close_websocket_after_error(&e);
-            } else {
-                let _ = set_content(ID_RESULT, "WebSocket connected. Negotiating DATA_STREAM…");
-            }
+            let _ = set_content(ID_RESULT, "WebSocket connected. Waiting for DATA_STREAM…");
+            spawn_local(async {
+                if let Err(e) = flush_pending_worker_data_stream().await {
+                    close_websocket_after_error(&e);
+                }
+            });
         });
         ws.set_onopen(Some(onopen.as_ref().unchecked_ref()));
         onopen.forget();
@@ -765,7 +659,7 @@ fn connect_websocket(url: &str) -> Result<(), JsValue> {
         let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
             match websocket_message_bytes(event.data()) {
                 Some(data) => {
-                    if let Err(e) = handle_websocket_protocol_bytes(&data) {
+                    if let Err(e) = post_message(MainToWorker::DataStream(data)) {
                         close_websocket_after_error(&e);
                     }
                 }
@@ -792,8 +686,8 @@ fn connect_websocket(url: &str) -> Result<(), JsValue> {
     {
         let onclose = Closure::<dyn FnMut(Event)>::new(move |_event: Event| {
             info!("Main: websocket input closed");
-            if let Err(e) = mark_websocket_eof() {
-                error!("Main: failed to send websocket EOF to worker: {e:?}");
+            if let Err(e) = post_message(MainToWorker::DataStream(Vec::new())) {
+                error!("Main: failed to send websocket disconnect to worker: {e:?}");
             }
             let _ = set_content(ID_RESULT, "WebSocket input closed.");
             WS_SOCKET.with(|slot| {

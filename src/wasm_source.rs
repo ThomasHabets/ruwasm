@@ -1,24 +1,31 @@
 //! Block for getting data from the UI thread, which in turn is getting it from
 //! websocket or a file.
+use rustradio::Result;
 use rustradio::block::{Block, BlockRet};
+use rustradio::data_stream::DataStreamId;
 use rustradio::stream::{ReadStream, WriteStream, new_stream};
-use rustradio::{Error, Result};
 
-use crate::{ReqData, WorkerToMain, worker::post_message};
+use crate::receiver_source;
 
 // TODO: magic value.
 const PRODUCE_CHANNEL_SIZE: usize = 10;
 const CHUNK_SIZE: u64 = 65536;
 
+/// Messages from the worker DATA_STREAM bridge into the WasmSource block.
 pub enum Msg {
+    /// No more bytes will arrive for this source.
     Eof,
+    /// Append bytes received for this source.
     Extend(Vec<u8>),
+    /// Clear the outstanding request flag and try requesting again.
+    RetryRequest,
 }
 
 /// Block for getting data from the UI thread, which in turn gets it from
 /// websocket (data stream) or a file.
 #[derive(rustradio_macros::Block)]
 pub struct WasmSource {
+    receiver: DataStreamId,
     buf: Vec<u8>,
     eof: bool,
     pos: u64,
@@ -34,6 +41,7 @@ impl WasmSource {
         let (dst, src) = new_stream();
         (
             Self {
+                receiver: receiver_source(),
                 buf: vec![],
                 dst,
                 eof: false,
@@ -51,18 +59,15 @@ impl WasmSource {
     fn extend(&mut self, data: &[u8]) {
         self.buf.extend(data);
     }
+    /// Ask the worker protocol bridge for another chunk if none is pending.
     fn req_more(&mut self) -> Result<()> {
         if !self.outstanding_req {
-            post_message(&WorkerToMain::ReqData(ReqData {
-                receiver: crate::RECEIVER_SOURCE,
-                pos: self.pos,
-                size: CHUNK_SIZE,
-            }))
-            .map_err(|e| Error::msg(format!("{e:?}")))?;
+            crate::worker::request_receiver_data(&self.receiver, self.pos, CHUNK_SIZE)?;
             self.outstanding_req = true;
         }
         Ok(())
     }
+    /// Drain all queued messages from the worker into local source state.
     fn check_msgs(&mut self) {
         loop {
             #[allow(clippy::match_same_arms)]
@@ -76,6 +81,9 @@ impl WasmSource {
                 Ok(Msg::Extend(v)) => {
                     self.pos += v.len() as u64;
                     self.extend(&v);
+                    self.outstanding_req = false;
+                }
+                Ok(Msg::RetryRequest) => {
                     self.outstanding_req = false;
                 }
             }
