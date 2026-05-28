@@ -4,8 +4,9 @@ use rustradio::stream::ReadStream;
 use rustradio::{Error, Float};
 
 use crate::FloatStreamRef;
-use crate::WorkerToMainRef;
 use crate::worker::post_message;
+
+type WorkerToMainRef<'a> = crate::WorkerToMainRef<'a, crate::AppEmpty>;
 
 /// A block that takes float data from its input and posts it to the main UI
 /// thread.

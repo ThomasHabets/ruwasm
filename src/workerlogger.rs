@@ -37,7 +37,7 @@ impl Log for WorkerLogger {
             return;
         };
 
-        let Ok(msg) = (WorkerToMain::LogLine {
+        let Ok(msg) = (WorkerToMain::<crate::AppEmpty>::LogLine {
             level: record.level(),
             line,
         })
