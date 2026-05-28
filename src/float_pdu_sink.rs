@@ -13,7 +13,7 @@ const DEBUG_KEEP_1_IN_N: usize = 1;
 /// The stream is identified by its name.
 #[derive(rustradio_macros::Block)]
 #[rustradio(new)]
-pub struct FloatPduSink {
+pub struct FloatPduSink<A, R> {
     name: String,
     sample_rate: Float,
     #[rustradio(in)]
@@ -22,9 +22,14 @@ pub struct FloatPduSink {
     // This is used for debugging only.
     #[rustradio(default)]
     skip: usize,
+
+    #[rustradio(default)]
+    _dummy_a: std::marker::PhantomData<A>,
+    #[rustradio(default)]
+    _dummy_b: std::marker::PhantomData<R>,
 }
 
-impl Block for FloatPduSink {
+impl<A: serde::Serialize + Send, R: serde::Serialize + Send> Block for FloatPduSink<A, R> {
     fn work(&mut self) -> rustradio::Result<BlockRet<'_>> {
         loop {
             let Some((samples, _tags)) = self.src.pop() else {
@@ -33,11 +38,13 @@ impl Block for FloatPduSink {
             self.skip += 1;
             if self.skip == DEBUG_KEEP_1_IN_N {
                 // This should not introduce a copy.
-                post_message(&WorkerToMain::FloatPduStreams(vec![FloatPduStream {
-                    name: self.name.clone(),
-                    sample_rate: self.sample_rate,
-                    samples,
-                }]))
+                post_message(&WorkerToMain::<A, R>::FloatPduStreams(vec![
+                    FloatPduStream {
+                        name: self.name.clone(),
+                        sample_rate: self.sample_rate,
+                        samples,
+                    },
+                ]))
                 .map_err(|e| Error::msg(format!("post float PDU stream: {e:?}")))?;
                 self.skip = 0;
             }

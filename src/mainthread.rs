@@ -20,7 +20,9 @@ use web_sys::{
 
 use crate::FloatStream;
 use crate::js_performance_now;
-use crate::{MainToWorker, WorkerToMain};
+
+type MainToWorker<'a> = crate::MainToWorker<crate::ApplicationSpecific, crate::StartupParameters>;
+type WorkerToMain<'a> = crate::WorkerToMain<crate::ApplicationSpecific, crate::ReadyData>;
 
 const HTML_DISABLED: &str = "disabled";
 const ID_RESULT: &str = "result";
@@ -304,7 +306,7 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
             );
             handle_worker_data_stream(data).await?;
         }
-        WorkerToMain::Ready => {
+        WorkerToMain::Ready(_todo) => {
             info!("Main: Received WorkerToMain::Ready");
             worker_msg_ready().await?;
         }
@@ -399,7 +401,10 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
                 .checked();
             // TODO: hard coded here.
             crate::time_sink::set_sample_rate(1000.0);
-            post_message(MainToWorker::Start { samp_rate, rtlsdr })?;
+            post_message(MainToWorker::Start(crate::StartupParameters {
+                samp_rate,
+                rtlsdr,
+            }))?;
             get_element(ID_FILE_INPUT)?
                 .dyn_into::<HtmlInputElement>()?
                 .set_disabled(false);

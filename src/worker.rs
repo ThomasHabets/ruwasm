@@ -20,7 +20,9 @@ use crate::data_stream::{DataStream, Event as DataStreamEvent, RequestState};
 use crate::js_performance_now;
 use crate::receiver_source;
 use crate::wasm_source;
-use crate::{MainToWorker, WorkerToMain};
+
+type MainToWorker<'a> = crate::MainToWorker<crate::ApplicationSpecific, crate::StartupParameters>;
+type WorkerToMain<'a> = crate::WorkerToMain<crate::ApplicationSpecific, crate::ReadyData>;
 
 // TODO: magic values.
 const SOURCE_CHANNEL_SIZE: usize = 10;
@@ -143,7 +145,7 @@ async fn handle_data_stream_bytes(data: &[u8]) -> Result<(), JsValue> {
 /// Handle message sent from Main thread to worker.
 async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
     match event.data().try_into()? {
-        MainToWorker::Start { samp_rate, rtlsdr } => {
+        MainToWorker::Start(crate::StartupParameters { samp_rate, rtlsdr }) => {
             debug!("Got MainToWorker::Start");
             // Run the decoder.
             let o = radio_1200(samp_rate, rtlsdr).await?;
@@ -197,7 +199,7 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
     global.set_onmessageerror(Some(onmsgerr.as_ref().unchecked_ref()));
     onmsgerr.forget();
 
-    post_message(&WorkerToMain::Ready)?;
+    post_message(&WorkerToMain::Ready(crate::ReadyData {}))?;
     info!("Done setting up worker");
 
     Ok(())
@@ -341,7 +343,11 @@ fn add_spectrum_tap(
         PduAverage::new(prev, 10),
     ];
     let sink =
-        crate::float_pdu_sink::FloatPduSink::new(prev, "iq_spectrum".into(), IF_SAMPLE_RATE as f32);
+        crate::float_pdu_sink::FloatPduSink::<crate::ApplicationSpecific, crate::ReadyData>::new(
+            prev,
+            "iq_spectrum".into(),
+            IF_SAMPLE_RATE as f32,
+        );
     g.add(Box::new(sink));
 
     src
