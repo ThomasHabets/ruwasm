@@ -8,15 +8,11 @@ use web_sys::DedicatedWorkerGlobalScope;
 
 use crate::WorkerToMain;
 
-struct WorkerLogger<A, R> {
+struct WorkerLogger {
     level: LevelFilter,
-    _dummy_a: std::marker::PhantomData<A>,
-    _dummy_b: std::marker::PhantomData<R>,
 }
 
-impl<A: serde::Serialize + Send + Sync, R: serde::Serialize + Send + Sync> Log
-    for WorkerLogger<A, R>
-{
+impl Log for WorkerLogger {
     fn enabled(&self, metadata: &Metadata<'_>) -> bool {
         metadata.level() <= self.level
     }
@@ -41,7 +37,9 @@ impl<A: serde::Serialize + Send + Sync, R: serde::Serialize + Send + Sync> Log
             return;
         };
 
-        let Ok(msg) = (WorkerToMain::<A, R>::LogLine {
+        // Since we're not sending application-specific data, we can use a fake
+        // type like `u8` in their place.
+        let Ok(msg) = (WorkerToMain::<u8, u8>::LogLine {
             level: record.level(),
             line,
         })
@@ -57,11 +55,9 @@ impl<A: serde::Serialize + Send + Sync, R: serde::Serialize + Send + Sync> Log
 
 /// Initialize worker logger.
 pub fn init_logging() -> Result<(), log::SetLoggerError> {
-    static LOGGER: WorkerLogger<crate::ApplicationSpecific, crate::ReadyData> = WorkerLogger {
+    static LOGGER: WorkerLogger = WorkerLogger {
         // TODO: make configurable.
         level: LevelFilter::Info,
-        _dummy_a: std::marker::PhantomData,
-        _dummy_b: std::marker::PhantomData,
     };
 
     log::set_logger(&LOGGER)?;
