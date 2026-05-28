@@ -37,9 +37,7 @@ impl Log for WorkerLogger {
             return;
         };
 
-        // Since we're not sending application-specific data, we can use a fake
-        // type like `u8` in their place.
-        let Ok(msg) = (WorkerToMain::<u8, u8>::LogLine {
+        let Ok(msg) = (WorkerToMain::<crate::AppEmpty>::LogLine {
             level: record.level(),
             line,
         })

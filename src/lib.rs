@@ -94,28 +94,57 @@ pub struct FloatPduStream {
 ///
 /// None, in this case.
 #[derive(Debug, Serialize, Deserialize)]
-enum ApplicationSpecific {}
+enum Ax25Messages {}
 
 /// Application specific startup parameters.
 #[derive(Debug, Serialize, Deserialize)]
-struct StartupParameters {
+struct Ax25Start {
     samp_rate: u64,
     rtlsdr: bool,
 }
+
+trait ApplicationSpecific {
+    // Can't default. https://github.com/rust-lang/rust/issues/29661
+    type App: Serialize;
+    type Start: Serialize;
+    type Ready: Serialize;
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Ax25Impl {}
+
+impl ApplicationSpecific for Ax25Impl {
+    type App = Ax25Messages;
+    type Start = Ax25Start;
+    type Ready = Ax25Ready;
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AppEmpty {}
+
+impl ApplicationSpecific for AppEmpty {
+    type App = AppEmpty;
+    type Start = AppEmpty;
+    type Ready = AppEmpty;
+}
+
+/// Application specific ready data.
+#[derive(Debug, Serialize, Deserialize)]
+struct Ax25Ready {}
 
 /// Messages going from main (UI) thread to worker.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 #[serde(bound(
-    serialize = "A: Serialize, S: Serialize",
-    deserialize = "A: Deserialize<'de>, S: Deserialize<'de>",
+    serialize = "App::App: Serialize, App::Start: Serialize",
+    deserialize = "App::App: Deserialize<'de>, App::Start: Deserialize<'de>",
 ))]
-enum MainToWorker<A, S> {
+enum MainToWorker<App: ApplicationSpecific> {
     /// Start the graph with the selected input byte format.
-    Start(S),
+    Start(App::Start),
 
     /// Application specific stuff.
-    ApplicationSpecific(A),
+    ApplicationSpecific(App::App),
 
     /// Raw DATA_STREAM protocol bytes received from the selected input source.
     DataStream(Vec<u8>),
@@ -130,40 +159,39 @@ enum MainToWorker<A, S> {
     Pong(f64),
 }
 
-impl<A: Serialize, S: Serialize> TryInto<wasm_bindgen::JsValue> for MainToWorker<A, S> {
+impl<App: ApplicationSpecific> TryInto<wasm_bindgen::JsValue> for MainToWorker<App> {
     type Error = wasm_bindgen::JsValue;
     fn try_into(self) -> Result<wasm_bindgen::JsValue, Self::Error> {
         Ok(serde_wasm_bindgen::to_value(&self)?)
     }
 }
 
-impl<A: serde::de::DeserializeOwned, T: serde::de::DeserializeOwned> TryFrom<wasm_bindgen::JsValue>
-    for MainToWorker<A, T>
+impl<App> TryFrom<wasm_bindgen::JsValue> for MainToWorker<App>
+where
+    App: ApplicationSpecific,
+    App::App: serde::de::DeserializeOwned,
+    App::Start: serde::de::DeserializeOwned,
 {
     type Error = wasm_bindgen::JsValue;
-    fn try_from(js: wasm_bindgen::JsValue) -> Result<MainToWorker<A, T>, Self::Error> {
+    fn try_from(js: wasm_bindgen::JsValue) -> Result<MainToWorker<App>, Self::Error> {
         Ok(serde_wasm_bindgen::from_value(js)?)
     }
 }
-
-/// Application specific ready data.
-#[derive(Debug, Serialize, Deserialize)]
-struct ReadyData {}
 
 /// Messages from the worker to the main (UI) thread.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 #[serde(bound(
-    serialize = "A: Serialize, R: Serialize",
-    deserialize = "A: Deserialize<'de>, R: Deserialize<'de>",
+    serialize = "App::App: Serialize, App::Ready: Serialize",
+    deserialize = "App::App: Deserialize<'de>, App::Ready: Deserialize<'de>",
 ))]
-enum WorkerToMain<A, R> {
+enum WorkerToMain<App: ApplicationSpecific> {
     /// Worker notifying the main UI thread that the rustradio graph has
     /// successfully started.
-    Ready(R),
+    Ready(App::Ready),
 
     /// Application specific messages.
-    ApplicationSpecific(A),
+    ApplicationSpecific(App::App),
 
     /// Send a ping with a `performance.now()` timestamp.
     /// The timestamp will be reflected in the Pong.
@@ -201,18 +229,21 @@ enum WorkerToMainRef<'a> {
     ComplexStreams(Vec<ComplexStreamRef<'a>>),
 }
 
-impl<A: Serialize, R: Serialize> TryInto<wasm_bindgen::JsValue> for WorkerToMain<A, R> {
+impl<App: ApplicationSpecific> TryInto<wasm_bindgen::JsValue> for WorkerToMain<App> {
     type Error = wasm_bindgen::JsValue;
     fn try_into(self) -> Result<wasm_bindgen::JsValue, Self::Error> {
         Ok(serde_wasm_bindgen::to_value(&self)?)
     }
 }
 
-impl<A: serde::de::DeserializeOwned, R: serde::de::DeserializeOwned> TryFrom<wasm_bindgen::JsValue>
-    for WorkerToMain<A, R>
+impl<App> TryFrom<wasm_bindgen::JsValue> for WorkerToMain<App>
+where
+    App: ApplicationSpecific,
+    App::App: serde::de::DeserializeOwned,
+    App::Ready: serde::de::DeserializeOwned,
 {
     type Error = wasm_bindgen::JsValue;
-    fn try_from(js: wasm_bindgen::JsValue) -> Result<WorkerToMain<A, R>, Self::Error> {
+    fn try_from(js: wasm_bindgen::JsValue) -> Result<WorkerToMain<App>, Self::Error> {
         Ok(serde_wasm_bindgen::from_value(js)?)
     }
 }
