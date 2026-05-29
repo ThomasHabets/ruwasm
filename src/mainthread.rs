@@ -560,9 +560,11 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
         &format!(
             r"<b>WASM loaded</b>
 WASM version: {}
+WASM author timestamp: {}
 WASM commit timestamp: {}
 WASM built by Rust version: {}",
             crate::git_version(),
+            crate::git_author_timestamp(),
             crate::git_commit_timestamp(),
             crate::rustc_version()
         ),

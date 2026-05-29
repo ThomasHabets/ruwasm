@@ -13,7 +13,7 @@ fn main() {
         .args([
             "show",
             "-s",
-            "--format=%ad",
+            "--format=%cd",
             "--date=format-local:%Y-%m-%dT%H:%M:%SZ",
             "HEAD",
         ])
@@ -24,6 +24,24 @@ fn main() {
     println!(
         "cargo:rustc-env=GIT_COMMIT_TIMESTAMP={}",
         git_commit_timestamp.trim()
+    );
+
+    let git_author_timestamp = std::process::Command::new("git")
+        .env("TZ", "UTC")
+        .args([
+            "show",
+            "-s",
+            "--format=%ad",
+            "--date=format-local:%Y-%m-%dT%H:%M:%SZ",
+            "HEAD",
+        ])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .unwrap_or_else(|| "unknown".into());
+    println!(
+        "cargo:rustc-env=GIT_AUTHOR_TIMESTAMP={}",
+        git_author_timestamp.trim()
     );
 
     {

@@ -303,6 +303,16 @@ pub fn git_version() -> String {
 /// Get the UTC timestamp of the current git commit.
 #[wasm_bindgen]
 #[must_use]
+pub fn git_author_timestamp() -> String {
+    // Wat? What's wrong with clippy?
+    #[allow(clippy::manual_string_new)]
+    env!("GIT_AUTHOR_TIMESTAMP").to_string()
+}
+
+/// Get the UTC timestamp of the current git commit after rebase etc taken into
+/// account.
+#[wasm_bindgen]
+#[must_use]
 pub fn git_commit_timestamp() -> String {
     // Wat? What's wrong with clippy?
     #[allow(clippy::manual_string_new)]
