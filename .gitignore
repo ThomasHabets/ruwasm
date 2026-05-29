@@ -1,3 +1,6 @@
 /target
 *.swp
 *.wasm
+attic/
+*.tgz
+*~
