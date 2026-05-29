@@ -8,6 +8,24 @@ fn main() {
         .unwrap_or_else(|| "unknown".into());
     println!("cargo:rustc-env=GIT_VERSION={}", git.trim());
 
+    let git_commit_timestamp = std::process::Command::new("git")
+        .env("TZ", "UTC")
+        .args([
+            "show",
+            "-s",
+            "--format=%ad",
+            "--date=format-local:%Y-%m-%dT%H:%M:%SZ",
+            "HEAD",
+        ])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .unwrap_or_else(|| "unknown".into());
+    println!(
+        "cargo:rustc-env=GIT_COMMIT_TIMESTAMP={}",
+        git_commit_timestamp.trim()
+    );
+
     {
         let rustc = std::env::var("RUSTC").unwrap();
         let out = std::process::Command::new(rustc)

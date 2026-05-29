@@ -300,6 +300,15 @@ pub fn git_version() -> String {
     env!("GIT_VERSION").to_string()
 }
 
+/// Get the UTC timestamp of the current git commit.
+#[wasm_bindgen]
+#[must_use]
+pub fn git_commit_timestamp() -> String {
+    // Wat? What's wrong with clippy?
+    #[allow(clippy::manual_string_new)]
+    env!("GIT_COMMIT_TIMESTAMP").to_string()
+}
+
 /// Get the version of the Rust compiler that built this.
 #[wasm_bindgen]
 #[must_use]
