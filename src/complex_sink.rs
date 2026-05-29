@@ -4,8 +4,9 @@ use rustradio::stream::ReadStream;
 use rustradio::{Complex, Error};
 
 use crate::ComplexStreamRef;
-use crate::WorkerToMainRef;
 use crate::worker::post_message;
+
+type WorkerToMainRef<'a> = crate::WorkerToMainRef<'a, crate::AppEmpty>;
 
 /// A block that takes data from its input and posts it to the main UI thread.
 ///

@@ -3,8 +3,10 @@ use rustradio::block::{Block, BlockRet};
 use rustradio::stream::NCReadStream;
 use rustradio::{Error, Float};
 
+use crate::FloatPduStream;
 use crate::worker::post_message;
-use crate::{FloatPduStream, WorkerToMain};
+
+type WorkerToMain = crate::WorkerToMain<crate::AppEmpty>;
 
 const DEBUG_KEEP_1_IN_N: usize = 1;
 
@@ -32,13 +34,11 @@ impl Block for FloatPduSink {
             };
             self.skip += 1;
             if self.skip == DEBUG_KEEP_1_IN_N {
-                post_message(&WorkerToMain::<crate::AppEmpty>::FloatPduStreams(vec![
-                    FloatPduStream {
-                        name: self.name.clone(),
-                        sample_rate: self.sample_rate,
-                        samples,
-                    },
-                ]))
+                post_message(&WorkerToMain::FloatPduStreams(vec![FloatPduStream {
+                    name: self.name.clone(),
+                    sample_rate: self.sample_rate,
+                    samples,
+                }]))
                 .map_err(|e| Error::msg(format!("post float PDU stream: {e:?}")))?;
                 self.skip = 0;
             }

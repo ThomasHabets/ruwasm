@@ -51,7 +51,7 @@ pub struct FloatStream {
 ///
 /// Must serialize the same as `FloatStream`.
 #[derive(Serialize)]
-struct FloatStreamRef<'a> {
+pub struct FloatStreamRef<'a> {
     name: &'a str,
     tags: Vec<rustradio::stream::Tag>,
     samples: &'a [rustradio::Float],
@@ -71,7 +71,7 @@ pub struct ComplexStream {
 ///
 /// Must serialize the same as `ComplexStream`.
 #[derive(Serialize)]
-struct ComplexStreamRef<'a> {
+pub struct ComplexStreamRef<'a> {
     name: &'a str,
     tags: Vec<rustradio::stream::Tag>,
     samples: &'a [rustradio::Complex],
@@ -103,7 +103,7 @@ struct Ax25Start {
     rtlsdr: bool,
 }
 
-trait ApplicationSpecific {
+pub trait ApplicationSpecific {
     // Can't default. https://github.com/rust-lang/rust/issues/29661
     type App: Serialize;
     type Start: Serialize;
@@ -119,8 +119,9 @@ impl ApplicationSpecific for Ax25Impl {
     type Ready = Ax25Ready;
 }
 
+/// No application specific messages required.
 #[derive(Debug, Serialize, Deserialize)]
-struct AppEmpty {}
+pub struct AppEmpty {}
 
 impl ApplicationSpecific for AppEmpty {
     type App = AppEmpty;
@@ -185,7 +186,7 @@ where
     serialize = "App::App: Serialize, App::Ready: Serialize",
     deserialize = "App::App: Deserialize<'de>, App::Ready: Deserialize<'de>",
 ))]
-enum WorkerToMain<App: ApplicationSpecific> {
+enum WorkerToMain<App: ApplicationSpecific = AppEmpty> {
     /// Worker notifying the main UI thread that the rustradio graph has
     /// successfully started.
     Ready(App::Ready),
@@ -212,19 +213,35 @@ enum WorkerToMain<App: ApplicationSpecific> {
     LogLine { level: log::Level, line: String },
 
     /// Float streams captured in the worker graph.
+    ///
+    /// TODO: This should be one receiver, multiple streams.
     FloatStreams(Vec<FloatStream>),
 
     /// Complex streams captured in the worker graph.
+    /// TODO: This should be one receiver, multiple streams.
     ComplexStreams(Vec<ComplexStream>),
 
     /// Float PDU streams captured in the worker graph.
+    ///
+    /// TODO: this should only be the one packet per packet, right?
     FloatPduStreams(Vec<FloatPduStream>),
 }
 
 /// Borrowed version of WorkerToMain. Must serialize the same.
 #[derive(Serialize)]
 #[serde(tag = "type", content = "data")]
-enum WorkerToMainRef<'a> {
+#[serde(bound(
+    serialize = "App::App: Serialize, App::Ready: Serialize",
+    deserialize = "App::App: Deserialize<'de>, App::Ready: Deserialize<'de>",
+))]
+pub enum WorkerToMainRef<'a, App: ApplicationSpecific = AppEmpty> {
+    /// Worker notifying the main UI thread that the rustradio graph has
+    /// successfully started.
+    Ready(App::Ready),
+
+    /// Application specific messages.
+    ApplicationSpecific(App::App),
+
     FloatStreams(Vec<FloatStreamRef<'a>>),
     ComplexStreams(Vec<ComplexStreamRef<'a>>),
 }
