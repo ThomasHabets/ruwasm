@@ -14,7 +14,7 @@ futures-channel = "0.3.32"
 futures-intrusive = "0.5.0"
 log = { version = "0.4.29", features = ["serde"] }
 num-complex = { version = "0.4", features = ["serde"] }
-rax25 = "0.2.5"
+rax25 = { version = "0.2.6", default-features = false }
 rustradio = { version = "0.16.9", features = ["wasm"] }
 #rustradio-ui = { version = "0", path = "../rustradio/rustradio-ui" }
 rustradio-ui = { version = "0.1.2" }
