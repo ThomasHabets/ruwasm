@@ -149,7 +149,7 @@ async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
             debug!("Got MainToWorker::Start");
             // Run the decoder.
             let o = radio_1200(samp_rate, rtlsdr).await?;
-            post_message(&WorkerToMain::Result(o))?;
+            post_message(&WorkerToMain::End(o))?;
         }
         MainToWorker::DataStream(data) => {
             trace!("Worker: Got DATA_STREAM bytes len {}", data.len());

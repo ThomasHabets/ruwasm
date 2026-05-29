@@ -108,6 +108,7 @@ pub trait ApplicationSpecific {
     type App: Serialize;
     type Start: Serialize;
     type Ready: Serialize;
+    type End: Serialize;
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -117,6 +118,7 @@ impl ApplicationSpecific for Ax25Impl {
     type App = Ax25Messages;
     type Start = Ax25Start;
     type Ready = Ax25Ready;
+    type End = String;
 }
 
 /// No application specific messages required.
@@ -127,6 +129,7 @@ impl ApplicationSpecific for AppEmpty {
     type App = AppEmpty;
     type Start = AppEmpty;
     type Ready = AppEmpty;
+    type End = AppEmpty;
 }
 
 /// Application specific ready data.
@@ -183,8 +186,8 @@ where
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 #[serde(bound(
-    serialize = "App::App: Serialize, App::Ready: Serialize",
-    deserialize = "App::App: Deserialize<'de>, App::Ready: Deserialize<'de>",
+    serialize = "App::App: Serialize, App::Ready: Serialize, App::End: Serialize",
+    deserialize = "App::App: Deserialize<'de>, App::Ready: Deserialize<'de>, App::End: Deserialize<'de>",
 ))]
 enum WorkerToMain<App: ApplicationSpecific = AppEmpty> {
     /// Worker notifying the main UI thread that the rustradio graph has
@@ -207,7 +210,7 @@ enum WorkerToMain<App: ApplicationSpecific = AppEmpty> {
     DataStream(Vec<u8>),
 
     /// At the end of execution, provide the result as a string.
-    Result(String),
+    End(App::End),
 
     /// A worker log line to be emitted through the main thread logger.
     LogLine { level: log::Level, line: String },
@@ -279,6 +282,7 @@ where
     App: ApplicationSpecific,
     App::App: serde::de::DeserializeOwned,
     App::Ready: serde::de::DeserializeOwned,
+    App::End: serde::de::DeserializeOwned,
 {
     type Error = wasm_bindgen::JsValue;
     fn try_from(js: wasm_bindgen::JsValue) -> Result<WorkerToMain<App>, Self::Error> {
@@ -396,6 +400,7 @@ mod tests {
         type App = TestAppMessage;
         type Start = TestStart;
         type Ready = TestReady;
+        type End = AppEmpty;
     }
 
     #[derive(Debug)]
@@ -405,6 +410,7 @@ mod tests {
         type App = TestAppMessageRef<'a>;
         type Start = TestStart;
         type Ready = TestReady;
+        type End = AppEmpty;
     }
 
     fn expected_app_message() -> TestAppMessage {

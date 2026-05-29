@@ -311,7 +311,7 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
             info!("Main: Received WorkerToMain::Ready");
             worker_msg_ready().await?;
         }
-        WorkerToMain::Result(s) => {
+        WorkerToMain::End(s) => {
             set_content(ID_RESULT, &s)?;
             info!("Main: worker returned: {s}");
         }
