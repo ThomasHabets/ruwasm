@@ -20,10 +20,7 @@ use web_sys::{
 };
 
 use crate::js_performance_now;
-
-//type MainToWorker<'a> = crate::MainToWorker<crate::ApplicationSpecific, crate::StartupParameters>;
-type MainToWorker = crate::MainToWorker<crate::Ax25Impl>;
-type WorkerToMain = crate::WorkerToMain<crate::Ax25Impl>;
+use crate::{Ax25Messages, MainToWorker, WorkerToMain};
 
 const HTML_DISABLED: &str = "disabled";
 const ID_RESULT: &str = "result";
@@ -300,6 +297,9 @@ fn close_websocket_after_error(err: &JsValue) {
 /// Handle message sent from the worker.
 async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
     match e.data().try_into()? {
+        WorkerToMain::ApplicationSpecific(Ax25Messages::Decoded(x)) => {
+            set_content(ID_RESULT, &format!("Decoded: {x:?}"))?;
+        }
         WorkerToMain::DataStream(data) => {
             debug!(
                 "Main: handling {} DATA_STREAM byte(s) from worker",
@@ -312,7 +312,6 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
             worker_msg_ready().await?;
         }
         WorkerToMain::End(s) => {
-            set_content(ID_RESULT, &format!("{s:?}"))?;
             info!("Main: worker returned: {s:?}");
         }
         WorkerToMain::LogLine { level, line } => {

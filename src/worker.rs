@@ -16,14 +16,12 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
+use crate::Ax25Messages;
 use crate::data_stream::{DataStream, Event as DataStreamEvent, RequestState};
 use crate::js_performance_now;
 use crate::receiver_source;
 use crate::wasm_source;
-
-type MainToWorker = crate::MainToWorker<crate::Ax25Impl>;
-type WorkerToMain = crate::WorkerToMain<crate::Ax25Impl>;
-type WorkerToMainRef<'a> = crate::WorkerToMain<crate::Ax25ImplRef<'a>>;
+use crate::{MainToWorker, WorkerToMain, WorkerToMainRef};
 
 // TODO: magic values.
 const SOURCE_CHANNEL_SIZE: usize = 10;
@@ -286,7 +284,27 @@ async fn radio_1200(samp_rate: u64, rtlsdr: bool) -> rustradio::Result<String> {
         NrziDecode::new(prev),
         HdlcDeframer::new(prev, 10, 1500),
         NCMap::new(prev, "log_packet", |x, tags| {
-            info!("Decoded packet! {x:?}");
+            info!("Found packet! {x:?}");
+            match rax25::Packet::parse(&x, None) {
+                Ok(packet) => {
+                    if let rax25::PacketType::Ui(ui) = packet.packet_type() {
+                        let payload = String::from_utf8_lossy(&ui.payload);
+                        info!("Parsed: {packet:?} / Payload as string: {payload:?}");
+                    } else if let rax25::PacketType::Iframe(i) = packet.packet_type() {
+                        let payload = String::from_utf8_lossy(&i.payload);
+                        info!("Parsed: {packet:?} / Payload as string: {payload:?}");
+                    } else {
+                        info!("Parsed: {packet:?}");
+                    }
+                    post_message(&WorkerToMain::ApplicationSpecific(Ax25Messages::Decoded(
+                        format!("Last decode: {packet:?}"),
+                    )))
+                    .unwrap();
+                }
+                Err(e) => {
+                    info!("Packet did not decode: {e}");
+                }
+            }
             vec![(x, tags)]
         }),
     ];

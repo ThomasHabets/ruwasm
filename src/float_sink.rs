@@ -6,7 +6,7 @@ use rustradio_ui::FloatStreamRef;
 
 use crate::worker::post_message;
 
-type WorkerToMainRef<'a> = crate::WorkerToMainRef<'a, rustradio_ui::AppEmpty>;
+type WorkerToMainRef<'a> = rustradio_ui::WorkerToMainRef<'a, rustradio_ui::AppEmpty>;
 
 /// A block that takes float data from its input and posts it to the main UI
 /// thread.

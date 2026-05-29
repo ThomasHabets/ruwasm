@@ -6,7 +6,7 @@ use rustradio_ui::FloatPduStream;
 
 use crate::worker::post_message;
 
-type WorkerToMain = crate::WorkerToMain<rustradio_ui::AppEmpty>;
+type WorkerToMain = rustradio_ui::WorkerToMain<rustradio_ui::AppEmpty>;
 
 const DEBUG_KEEP_1_IN_N: usize = 1;
 
