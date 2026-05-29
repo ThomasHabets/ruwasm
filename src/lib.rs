@@ -103,6 +103,18 @@ struct Ax25Start {
     rtlsdr: bool,
 }
 
+/// Application specific end result.
+#[derive(Debug, Serialize, Deserialize)]
+struct Ax25End {
+    s: String,
+}
+
+/// Application specific end result.
+#[derive(Debug, Serialize, Deserialize)]
+struct Ax25EndRef<'a> {
+    s: &'a str,
+}
+
 pub trait ApplicationSpecific {
     // Can't default. https://github.com/rust-lang/rust/issues/29661
     type App: Serialize;
@@ -118,7 +130,19 @@ impl ApplicationSpecific for Ax25Impl {
     type App = Ax25Messages;
     type Start = Ax25Start;
     type Ready = Ax25Ready;
-    type End = String;
+    type End = Ax25End;
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Ax25ImplRef<'a> {
+    _dummy: std::marker::PhantomData<&'a u8>,
+}
+
+impl<'a> ApplicationSpecific for Ax25ImplRef<'a> {
+    type App = Ax25Messages;
+    type Start = Ax25Start;
+    type Ready = Ax25Ready;
+    type End = Ax25EndRef<'a>;
 }
 
 /// No application specific messages required.

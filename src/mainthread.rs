@@ -312,8 +312,8 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
             worker_msg_ready().await?;
         }
         WorkerToMain::End(s) => {
-            set_content(ID_RESULT, &s)?;
-            info!("Main: worker returned: {s}");
+            set_content(ID_RESULT, &format!("{s:?}"))?;
+            info!("Main: worker returned: {s:?}");
         }
         WorkerToMain::LogLine { level, line } => {
             log::log!(level, "[worker] {line}");

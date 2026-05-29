@@ -23,6 +23,7 @@ use crate::wasm_source;
 
 type MainToWorker = crate::MainToWorker<crate::Ax25Impl>;
 type WorkerToMain = crate::WorkerToMain<crate::Ax25Impl>;
+type WorkerToMainRef<'a> = crate::WorkerToMain<crate::Ax25ImplRef<'a>>;
 
 // TODO: magic values.
 const SOURCE_CHANNEL_SIZE: usize = 10;
@@ -149,7 +150,9 @@ async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
             debug!("Got MainToWorker::Start");
             // Run the decoder.
             let o = radio_1200(samp_rate, rtlsdr).await?;
-            post_message(&WorkerToMain::End(o))?;
+            // Using reference serialization here doesn't actually help, but it
+            // does work.
+            post_message(&WorkerToMainRef::End(crate::Ax25EndRef { s: &o }))?;
         }
         MainToWorker::DataStream(data) => {
             trace!("Worker: Got DATA_STREAM bytes len {}", data.len());
