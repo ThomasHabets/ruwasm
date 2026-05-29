@@ -2,11 +2,11 @@
 use rustradio::block::{Block, BlockRet};
 use rustradio::stream::NCReadStream;
 use rustradio::{Error, Float};
+use rustradio_ui::FloatPduStream;
 
-use crate::FloatPduStream;
 use crate::worker::post_message;
 
-type WorkerToMain = crate::WorkerToMain<crate::AppEmpty>;
+type WorkerToMain = crate::WorkerToMain<rustradio_ui::AppEmpty>;
 
 const DEBUG_KEEP_1_IN_N: usize = 1;
 

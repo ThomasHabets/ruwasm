@@ -6,7 +6,7 @@ use log::{Level, LevelFilter, Log, Metadata, Record};
 use wasm_bindgen::JsCast;
 use web_sys::DedicatedWorkerGlobalScope;
 
-use crate::WorkerToMain;
+type WorkerToMain = rustradio_ui::WorkerToMain<rustradio_ui::AppEmpty>;
 
 struct WorkerLogger {
     level: LevelFilter,
@@ -37,7 +37,7 @@ impl Log for WorkerLogger {
             return;
         };
 
-        let Ok(msg) = (WorkerToMain::<crate::AppEmpty>::LogLine {
+        let Ok(msg) = (WorkerToMain::LogLine {
             level: record.level(),
             line,
         })

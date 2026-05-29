@@ -6,8 +6,8 @@ use std::collections::VecDeque;
 use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, Event, HtmlCanvasElement};
 
-use crate::FloatPduStream;
 use crate::mainthread::get_element;
+use rustradio_ui::FloatPduStream;
 
 const ID_SPECTRUM_CANVAS: &str = "spectrum-graph";
 const ID_WATERFALL_CANVAS: &str = "waterfall-graph";

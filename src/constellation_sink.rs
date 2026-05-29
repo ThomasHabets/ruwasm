@@ -6,8 +6,8 @@ use std::collections::VecDeque;
 use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, Event, HtmlCanvasElement};
 
-use crate::ComplexStream;
 use crate::mainthread::get_element;
+use rustradio_ui::ComplexStream;
 
 const ID_CONSTELLATION_CANVAS: &str = "constellation-graph";
 const MAX_CONSTELLATION_POINTS: usize = 5_000;

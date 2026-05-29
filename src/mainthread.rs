@@ -10,6 +10,7 @@ use log::{debug, error, info, warn};
 use rustradio::data_stream::{
     BytesReader, DataStreamId, PROTOCOL_VERSION, Packet, RequestData, SyncWriter,
 };
+use rustradio_ui::FloatStream;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::js_sys;
@@ -18,7 +19,6 @@ use web_sys::{
     BinaryType, Element, Event, File, HtmlInputElement, MessageEvent, WebSocket, Worker,
 };
 
-use crate::FloatStream;
 use crate::js_performance_now;
 
 //type MainToWorker<'a> = crate::MainToWorker<crate::ApplicationSpecific, crate::StartupParameters>;

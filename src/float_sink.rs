@@ -2,11 +2,11 @@
 use rustradio::block::{Block, BlockRet};
 use rustradio::stream::ReadStream;
 use rustradio::{Error, Float};
+use rustradio_ui::FloatStreamRef;
 
-use crate::FloatStreamRef;
 use crate::worker::post_message;
 
-type WorkerToMainRef<'a> = crate::WorkerToMainRef<'a, crate::AppEmpty>;
+type WorkerToMainRef<'a> = crate::WorkerToMainRef<'a, rustradio_ui::AppEmpty>;
 
 /// A block that takes float data from its input and posts it to the main UI
 /// thread.

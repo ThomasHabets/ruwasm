@@ -10,12 +10,12 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 
 use log::debug;
+use rustradio_ui::FloatStream;
 use wasm_bindgen::prelude::*;
 use web_sys::{
     CanvasRenderingContext2d, Event, HtmlButtonElement, HtmlCanvasElement, HtmlInputElement,
 };
 
-use crate::FloatStream;
 use crate::mainthread::get_element;
 
 const ID_GRAPH_CANVAS: &str = "float-graph";
