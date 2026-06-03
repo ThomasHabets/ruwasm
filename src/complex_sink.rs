@@ -24,11 +24,14 @@ impl Block for ComplexSink {
         let (input, tags) = self.src.read_buf()?;
         let ilen = input.len();
         if ilen > 0 {
-            post_message(&WorkerToMainRef::ComplexStreams(vec![ComplexStreamRef {
-                name: &self.name,
-                tags,
-                samples: input.slice(),
-            }]))
+            post_message(&WorkerToMainRef::ComplexStreams(vec![
+                ComplexStreamRef {
+                    name: &self.name,
+                    tags: tags.as_slice(),
+                    samples: input.slice(),
+                }
+                .into(),
+            ]))
             .map_err(|e| Error::msg(format!("post complex streams: {e:?}")))?;
             input.consume(ilen);
         }
