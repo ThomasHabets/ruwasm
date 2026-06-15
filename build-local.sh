@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # RUSTFLAGS2='-C target-feature=+atomics,+bulk-memory,+mutable-globals'
-#
+export RUSTFLAGS="-C target-feature=+simd128,+relaxed-simd,+bulk-memory,+mutable-globals,+sign-ext,+nontrapping-fptoint,+reference-types,+multivalue,+tail-call,+atomics"
+# memory64 not supported by rustc, but supported by chrome
 WEBD="web"
 PREFIX="ruwasm"
 TMPD="$(mktemp -d)"
