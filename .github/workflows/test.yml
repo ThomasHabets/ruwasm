@@ -16,5 +16,7 @@ jobs:
     - uses: actions/checkout@v3
     - name: Cargo install
       run: cargo install --locked cargo-deny tickbox
+    - name: Install rust wasm32
+      run: rustup target add wasm32-unknown-unknown
     - name: Run tests
       run: NODIFF=true CLEANUP=true tickbox --dir tickbox/pre-commit --disable-tui --max-concurrency=1
