@@ -64,7 +64,13 @@ impl Log for DomConsoleLogger {
             content.push('\n');
         }
         el.set_inner_text(&content);
-        el.set_scroll_top(el.scroll_height());
+
+        // Looks like this type varies, so either into() is needed, or in clippy
+        // warns.
+        #[allow(clippy::useless_conversion)]
+        {
+            el.set_scroll_top(el.scroll_height().into());
+        }
     }
 
     fn flush(&self) {}

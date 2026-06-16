@@ -367,6 +367,20 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
     {
         let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
             info!("button clicked");
+            spawn_local(async move {
+                // Get the RTLSDR.
+                match rtlsdr_pure::open_first().await {
+                    Err(e) => warn!("Failed to open RTLSDR: {e}"),
+                    Ok(sdr) => {
+                        info!(
+                            "opened {:04x}:{:04x} {}",
+                            sdr.vendor_id(),
+                            sdr.product_id(),
+                            sdr.known_name().unwrap_or("RTL-SDR")
+                        );
+                    }
+                }
+            });
             set_content(ID_RESULT, &format!("Result of add: {}", crate::add(3, 5)))
         });
         let btn = get_element(ID_ADD)?.dyn_into::<web_sys::HtmlButtonElement>()?;
