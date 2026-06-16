@@ -15,6 +15,7 @@ use rustradio_ui::ApplicationSpecific;
 mod complex_sink;
 mod constellation_sink;
 mod data_stream;
+mod decim5;
 mod domlogger;
 mod float_pdu_sink;
 mod float_sink;

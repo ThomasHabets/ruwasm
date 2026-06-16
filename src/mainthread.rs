@@ -10,6 +10,7 @@ use log::{debug, error, info, warn};
 use rustradio::data_stream::{
     BytesReader, DataStreamId, PROTOCOL_VERSION, Packet, RequestData, SyncWriter,
 };
+use rustradio::{Complex, Float};
 use rustradio_ui::FloatStream;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
@@ -34,6 +35,8 @@ const ID_ADD: &str = "btn-add";
 const ID_PING: &str = "btn-ping";
 const ID_HTML: &str = "root-html";
 const ID_RTLSDR: &str = "btn-rtlsdr";
+const ID_RTLSDR_FREQUENCY: &str = "input-rtlsdr-frequency";
+const ID_RTLSDR_OFFSET: &str = "input-rtlsdr-offset";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum InputSource {
@@ -361,12 +364,37 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
     Ok(())
 }
 
+fn rtlsdr_encode_sample(sample: f32) -> u8 {
+    ((sample / 0.008) + 127.0).round().clamp(0.0, 255.0) as u8
+}
+
+#[allow(clippy::too_many_lines)]
 async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> {
     select_input_source(InputSource::RtlSdr)?;
     disable_input_selectors()?;
 
-    let sample_rate = 250_000;
-    let freq = 144_825_000;
+    let sample_rate = 250_000u32;
+
+    let freq: i32 = get_element(ID_RTLSDR_FREQUENCY)?
+        .dyn_into::<web_sys::HtmlInputElement>()?
+        .value()
+        .parse()
+        .map_err(|e| JsValue::from_str(&format!("parsing sample rate: {e}")))?;
+    let offset: i32 = get_element(ID_RTLSDR_OFFSET)?
+        .dyn_into::<web_sys::HtmlInputElement>()?
+        .value()
+        .parse()
+        .map_err(|e| JsValue::from_str(&format!("parsing sample rate: {e}")))?;
+    let freq = u32::try_from(freq - offset).map_err(|_e| {
+        JsValue::from_str(&format!("frequency {freq} can't subtract offset {offset}"))
+    })?;
+
+    if offset.unsigned_abs() > sample_rate / 2 - 25_000 {
+        return Err(JsValue::from_str(&format!(
+            "offset {offset} must be within half sample rate minus buffer {}",
+            sample_rate / 2 - 25_000
+        )));
+    }
 
     info!(
         "RTLSDR manufacturer: {}",
@@ -399,15 +427,70 @@ async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> 
     // Stream data.
     let read_len = 16 * 32 * 512usize;
     info!("Reading from rtlsdr");
-    loop {
-        let bytes = sdr.read_bytes(read_len).await?;
+    let freq_shift: f32 = -(offset as f32) / (actual_rate as f32); // cycles/sample
 
-        // TODO: ugly ugly downsample.
-        let bytes: Vec<_> = bytes
-            .chunks_exact(2)
-            .step_by(5)
-            .flat_map(|pair| pair.iter().copied())
-            .collect();
+    let phase_step = 2.0 * std::f32::consts::PI * freq_shift;
+
+    let osc: Vec<_> = (0..10)
+        .map(|n| {
+            let phase = phase_step * n as Float;
+            Complex::new(phase.cos(), phase.sin())
+        })
+        .collect();
+
+    info!("Running the loop");
+    let mut n = 0usize;
+    let mut deadline = js_performance_now() + 1000.0f64; // One second. Basically infinite time.
+    loop {
+        let now = js_performance_now();
+        if now > deadline {
+            warn!(
+                "Slow to read from RTLSDR! Missed it by {} ms",
+                now - deadline
+            );
+        }
+        let bytes = sdr.read_bytes(read_len).await?;
+        deadline =
+            js_performance_now() + 1_000.0f64 * ((bytes.len() / 2) as f64) / f64::from(actual_rate);
+        assert!(bytes.len().is_multiple_of(2));
+
+        let bytes: Vec<u8> = if offset != 0 {
+            // Convert to complex.
+            let iq: Vec<_> = bytes
+                .chunks_exact(2)
+                .map(|s| {
+                    let x = rustradio::Complex::new(
+                        (f32::from(s[0]) - 127.0) * 0.008,
+                        (f32::from(s[1]) - 127.0) * 0.008,
+                    );
+                    if false {
+                        x
+                    } else {
+                        n += 1;
+                        if n == 10 {
+                            n = 0;
+                        }
+                        x * osc[n]
+                    }
+                })
+                .collect();
+
+            // Filter & decimate.
+            let iq = crate::decim5::decim5(&iq);
+            //let iq: Vec<_> = iq.into_iter().step_by(5).collect();
+
+            // Convert back to bytes.
+            iq.iter()
+                .flat_map(|s| [rtlsdr_encode_sample(s.re), rtlsdr_encode_sample(s.im)])
+                .collect()
+        } else {
+            // TODO: we should filter.
+            bytes
+                .chunks_exact(2)
+                .step_by(5)
+                .flat_map(|pair| pair.iter().copied())
+                .collect()
+        };
 
         log::trace!("Read {} bytes from rtlsdr", bytes.len());
         let packet = rustradio::data_stream::PacketRef::Data {
