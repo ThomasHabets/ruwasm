@@ -6,6 +6,8 @@ WEBD="web"
 PREFIX="ruwasm"
 OUTDIR="dist"
 
+export RUSTFLAGS="-C target-feature=+simd128,+relaxed-simd,+bulk-memory,+mutable-globals,+sign-ext,+nontrapping-fptoint,+reference-types,+multivalue,+tail-call,+atomics --cfg=web_sys_unstable_apis"
+
 rm -rf "$OUTDIR"
 mkdir -p "$OUTDIR"
 
