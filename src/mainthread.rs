@@ -425,7 +425,7 @@ async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> 
     }
 
     // Stream data.
-    let read_len = 16 * 32 * 512usize;
+    let read_len = 65536usize; // at 250ksps this is a 262ms.
     info!("Reading from rtlsdr");
     let freq_shift: f32 = -(offset as f32) / (actual_rate as f32); // cycles/sample
 
