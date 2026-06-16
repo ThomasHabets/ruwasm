@@ -16,8 +16,8 @@
                 Example of RustRadio running 100% in the browser as WASM.
                 <ol>
                         <li>Enter the correct sample rate</li>
-                        <li>Start the rustradio graph (big button, below)</li>
-                        <li>Upload a capture file or connect a WebSocket source</li>
+                        <li>Start the rustradio graph receiver</li>
+                        <li>Select a data source</li>
                 </ol>
         </p>
       </div>
@@ -61,7 +61,7 @@
         <div class="panel-header">
           <div>
             <h2 class="panel-title">Receiver</h2>
-            <p class="panel-kicker">32-bit complex I/Q or RTL-SDR input</p>
+            <p class="panel-kicker">Start the RustRadio graph</p>
           </div>
         </div>
         <div id="form-rr" class="panel-body control-stack">
@@ -74,7 +74,19 @@
             <span>RTL-SDR unsigned 8-bit I/Q input</span>
           </label>
           <button id="btn-start" class="primary-action" type="button" disabled>Start RustRadio graph</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Data source</h2>
+            <p class="panel-kicker">32-bit complex I/Q or RTL-SDR input</p>
+          </div>
+        </div>
+        <div id="form-rr" class="panel-body control-stack">
           <div class="field-group">
+            <h3>File source</h3>
             <label for="fileInput">Capture file</label>
             <input type="file" id="fileInput" disabled>
             <p class="file-note">
@@ -82,13 +94,17 @@
               <a href="https://cement.retrofitta.se/tmp/aprs1200_50ksps.c32">aprs1200_50ksps.c32</a>
             </p>
           </div>
+          <hr>
           <div class="field-group">
-            <label for="input-ws-url">WebSocket capture URL</label>
+            <h3>WebSocket stream</h3>
+            <label for="input-ws-url">WebSocket URL</label>
             <input id="input-ws-url" type="url"
             placeholder="ws://localhost:8080/" value="ws://localhost:8080/" disabled>
             <button id="btn-ws-connect" type="button" disabled>Connect WebSocket stream</button>
           </div>
+          <hr>
           <div class="field-group">
+                  <h3>RTL-SDR stream</h3>
             <label for="input-rtlsdr-frequency">Frequency (Hz)</label>
             <input id="input-rtlsdr-frequency" type="number" min="1" step="1"
                     value="144800000" inputmode="numeric" disabled>
