@@ -52,17 +52,22 @@ impl Log for DomConsoleLogger {
             return;
         };
 
-        let mut lines = self.log_lines.lock().unwrap();
-        lines.push_back(line);
-        while lines.len() > MAX_LOG_MESSAGES {
-            lines.pop_front();
-        }
+        // Not that we expect to be multithreaded, but hold the lock a
+        // shorter time anyway.
+        let content = {
+            let mut lines = self.log_lines.lock().unwrap();
+            lines.push_back(line);
+            while lines.len() > MAX_LOG_MESSAGES {
+                lines.pop_front();
+            }
 
-        let mut content = String::new();
-        for line in lines.iter() {
-            content.push_str(line);
-            content.push('\n');
-        }
+            let mut content = String::new();
+            for line in lines.iter() {
+                content.push_str(line);
+                content.push('\n');
+            }
+            content
+        };
         el.set_inner_text(&content);
 
         // Looks like this type varies, so either into() is needed, or in clippy
