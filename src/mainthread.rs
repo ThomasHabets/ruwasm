@@ -33,12 +33,14 @@ const ID_WS_CONNECT: &str = "btn-ws-connect";
 const ID_ADD: &str = "btn-add";
 const ID_PING: &str = "btn-ping";
 const ID_HTML: &str = "root-html";
+const ID_RTLSDR: &str = "btn-rtlsdr";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum InputSource {
     None,
     File,
     WebSocket,
+    RtlSdr,
 }
 
 thread_local! {
@@ -227,6 +229,7 @@ async fn route_worker_data_stream(data: Vec<u8>) -> Result<(), JsValue> {
             store_pending_worker_data_stream(data);
             Ok(())
         }
+        InputSource::RtlSdr => Ok(()), // TOOD: do something?
         InputSource::None => {
             info!("Main: waiting for an input source before routing DATA_STREAM bytes");
             store_pending_worker_data_stream(data);
@@ -358,11 +361,103 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
     Ok(())
 }
 
+async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> {
+    select_input_source(InputSource::RtlSdr)?;
+    disable_input_selectors()?;
+
+    let sample_rate = 250_000;
+    let freq = 144_825_000;
+
+    info!(
+        "RTLSDR manufacturer: {}",
+        sdr.manufacturer().unwrap_or("<unknown>")
+    );
+    info!("RTLSDR product: {}", sdr.product().unwrap_or("<unknown>"));
+    info!("RTLSDR tuner: {:?}", sdr.tuner_kind());
+    let actual_rate = sdr.set_sample_rate(sample_rate).await?;
+    info!("sample rate: {actual_rate} Hz");
+
+    if sdr.tuner_kind().is_supported() {
+        sdr.set_tuner_gain(rtlsdr_pure::GainMode::Auto).await?;
+        sdr.set_center_frequency(freq).await?;
+        info!("center frequency: {freq} Hz");
+    } else {
+        info!("center frequency: skipped for unsupported tuner");
+    }
+    sdr.reset_buffer().await?;
+
+    // Init stream.
+    {
+        let packet =
+            rustradio::data_stream::PacketRef::Version(rustradio::data_stream::PROTOCOL_VERSION);
+        let mut buf: Vec<u8> = Vec::new();
+        let mut w: SyncWriter<&mut Vec<u8>> = rustradio::data_stream::SyncWriter::new(&mut buf);
+        w.write_packet(packet)?;
+        post_message(MainToWorker::DataStream(buf))?;
+    }
+
+    // Stream data.
+    let read_len = 16 * 32 * 512usize;
+    info!("Reading from rtlsdr");
+    loop {
+        let bytes = sdr.read_bytes(read_len).await?;
+
+        // TODO: ugly ugly downsample.
+        let bytes: Vec<_> = bytes
+            .chunks_exact(2)
+            .step_by(5)
+            .flat_map(|pair| pair.iter().copied())
+            .collect();
+
+        log::trace!("Read {} bytes from rtlsdr", bytes.len());
+        let packet = rustradio::data_stream::PacketRef::Data {
+            stream_id: &rustradio::data_stream::DataStreamId::new("rtl-sdr"),
+            //stream_id: "rtl-sdr".into(),
+            data: &bytes,
+        };
+        let mut buf = Vec::new();
+        let mut w = rustradio::data_stream::SyncWriter::new(&mut buf);
+        w.write_packet(packet)?;
+        post_message(MainToWorker::DataStream(buf))?;
+    }
+}
+
 /// Handle receiving a message from the worker saying it's ready.
 ///
 /// This means we should enable UI controls.
 #[allow(clippy::unused_async)]
+#[allow(clippy::too_many_lines)]
 async fn worker_msg_ready() -> Result<(), JsValue> {
+    // Set up RTLSDR button.
+    {
+        let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
+            spawn_local(async move {
+                // Get the RTLSDR.
+                let sdr = match rtlsdr_pure::open_first().await {
+                    Err(e) => {
+                        warn!("Failed to open RTLSDR: {e}");
+                        return;
+                    }
+                    Ok(sdr) => {
+                        info!(
+                            "opened {:04x}:{:04x} {}",
+                            sdr.vendor_id(),
+                            sdr.product_id(),
+                            sdr.known_name().unwrap_or("RTL-SDR")
+                        );
+                        sdr
+                    }
+                };
+                if let Err(e) = run_rtlsdr_source(sdr).await {
+                    warn!("RTL SDR source failed: {e:?}");
+                }
+            });
+            Ok(())
+        });
+        let btn = get_element(ID_RTLSDR)?.dyn_into::<web_sys::HtmlButtonElement>()?;
+        btn.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())?;
+        handler.forget();
+    }
     // Set up Add button.
     {
         let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
@@ -421,6 +516,9 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
                 .set_disabled(false);
             get_element(ID_WS_URL)?
                 .dyn_into::<HtmlInputElement>()?
+                .set_disabled(false);
+            get_element(ID_RTLSDR)?
+                .dyn_into::<web_sys::HtmlButtonElement>()?
                 .set_disabled(false);
             get_element(ID_WS_CONNECT)?
                 .dyn_into::<web_sys::HtmlButtonElement>()?
@@ -741,6 +839,9 @@ fn disable_input_selectors() -> Result<(), JsValue> {
         .set_disabled(true);
     get_element(ID_WS_URL)?
         .dyn_into::<HtmlInputElement>()?
+        .set_disabled(true);
+    get_element(ID_RTLSDR)?
+        .dyn_into::<web_sys::HtmlButtonElement>()?
         .set_disabled(true);
     get_element(ID_WS_CONNECT)?
         .dyn_into::<web_sys::HtmlButtonElement>()?

@@ -947,9 +947,9 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "rtlsdr-pure"
-version = "0.1.4"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "698d89c2941f51836fdbc0073027847b1d344b922759b78443414a9f0d020011"
+checksum = "3d833664b81d8f425dfdb9b79ce884b9d22800bb856a52bbca383e6f28a2648d"
 dependencies = [
  "cross_usb_versionbump",
  "js-sys",
