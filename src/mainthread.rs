@@ -600,9 +600,17 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
             get_element(ID_WS_URL)?
                 .dyn_into::<HtmlInputElement>()?
                 .set_disabled(false);
-            get_element(ID_RTLSDR)?
-                .dyn_into::<web_sys::HtmlButtonElement>()?
-                .set_disabled(false);
+            if rtlsdr {
+                get_element(ID_RTLSDR_FREQUENCY)?
+                    .dyn_into::<HtmlInputElement>()?
+                    .set_disabled(false);
+                get_element(ID_RTLSDR_OFFSET)?
+                    .dyn_into::<HtmlInputElement>()?
+                    .set_disabled(false);
+                get_element(ID_RTLSDR)?
+                    .dyn_into::<web_sys::HtmlButtonElement>()?
+                    .set_disabled(false);
+            }
             get_element(ID_WS_CONNECT)?
                 .dyn_into::<web_sys::HtmlButtonElement>()?
                 .set_disabled(false);
@@ -920,11 +928,21 @@ fn disable_input_selectors() -> Result<(), JsValue> {
     get_element(ID_FILE_INPUT)?
         .dyn_into::<HtmlInputElement>()?
         .set_disabled(true);
-    get_element(ID_WS_URL)?
+
+    // RTL-SDR
+    get_element(ID_RTLSDR_FREQUENCY)?
+        .dyn_into::<HtmlInputElement>()?
+        .set_disabled(true);
+    get_element(ID_RTLSDR_OFFSET)?
         .dyn_into::<HtmlInputElement>()?
         .set_disabled(true);
     get_element(ID_RTLSDR)?
         .dyn_into::<web_sys::HtmlButtonElement>()?
+        .set_disabled(true);
+
+    // Websocket.
+    get_element(ID_WS_URL)?
+        .dyn_into::<HtmlInputElement>()?
         .set_disabled(true);
     get_element(ID_WS_CONNECT)?
         .dyn_into::<web_sys::HtmlButtonElement>()?
