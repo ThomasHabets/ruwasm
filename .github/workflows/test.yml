@@ -15,8 +15,6 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Cargo install
-      run: cargo install cargo-deny tickbox
-    - name: Build
-      run: cargo build --verbose
+      run: cargo install --locked cargo-deny tickbox
     - name: Run tests
       run: NODIFF=true CLEANUP=true tickbox --dir tickbox/pre-commit --disable-tui --max-concurrency=1
