@@ -266,7 +266,7 @@ async fn radio_1200(samp_rate: u64, rtlsdr: bool) -> rustradio::Result<String> {
         FftFilterFloat::new(
             prev,
             &rustradio::fir::low_pass(
-                samp_rate,
+                if_rate,
                 1100.0,
                 100.0,
                 &rustradio::window::WindowType::Hamming
