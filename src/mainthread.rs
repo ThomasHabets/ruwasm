@@ -7,10 +7,10 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use log::{debug, error, info, warn};
+use rustradio::Complex;
 use rustradio::data_stream::{
     BytesReader, DataStreamId, PROTOCOL_VERSION, Packet, RequestData, SyncWriter,
 };
-use rustradio::{Complex, Float};
 use rustradio_ui::FloatStream;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
@@ -427,19 +427,11 @@ async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> 
     // Stream data.
     let read_len = 65536usize; // at 250ksps this is a 262ms.
     info!("Reading from rtlsdr");
-    let freq_shift: f32 = -(offset as f32) / (actual_rate as f32); // cycles/sample
-
-    let phase_step = 2.0 * std::f32::consts::PI * freq_shift;
-
-    let osc: Vec<_> = (0..10)
-        .map(|n| {
-            let phase = phase_step * n as Float;
-            Complex::new(phase.cos(), phase.sin())
-        })
-        .collect();
+    let phase_step = -std::f32::consts::TAU * (offset as f32) / (actual_rate as f32);
+    let rotation = Complex::new(phase_step.cos(), phase_step.sin());
+    let mut oscillator = Complex::new(1.0, 0.0);
 
     info!("Running the loop");
-    let mut n = 0usize;
     let mut deadline = js_performance_now() + 1000.0f64; // One second. Basically infinite time.
     loop {
         let now = js_performance_now();
@@ -463,17 +455,15 @@ async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> 
                         (f32::from(s[0]) - 127.0) * 0.008,
                         (f32::from(s[1]) - 127.0) * 0.008,
                     );
-                    if false {
-                        x
-                    } else {
-                        n += 1;
-                        if n == 10 {
-                            n = 0;
-                        }
-                        x * osc[n]
-                    }
+                    let shifted = x * oscillator;
+                    oscillator *= rotation;
+                    shifted
                 })
                 .collect();
+            let osc_norm = oscillator.norm();
+            if osc_norm > 0.0 {
+                oscillator /= osc_norm;
+            }
 
             // Filter & decimate.
             let iq = crate::decim5::decim5(&iq);
