@@ -7,7 +7,9 @@ use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, Event, HtmlCanvasElement};
 
 use crate::mainthread::get_element;
-use rustradio_ui::FloatPduStream;
+
+use rustradio::Float;
+use rustradio_ui::TaggedVec;
 
 const ID_SPECTRUM_CANVAS: &str = "spectrum-graph";
 const ID_WATERFALL_CANVAS: &str = "waterfall-graph";
@@ -25,7 +27,7 @@ thread_local! {
 }
 
 struct SpectrumState {
-    latest: Option<FloatPduStream>,
+    latest: Option<TaggedVec<Float>>,
     history: VecDeque<Vec<f32>>,
     sample_rate: f32,
     waterfall_width: u32,
@@ -45,11 +47,12 @@ impl SpectrumState {
         }
     }
 
-    fn set_latest(&mut self, frames: Vec<FloatPduStream>) {
+    fn set_latest(&mut self, frames: Vec<TaggedVec<Float>>) {
         for frame in frames {
-            if !frame.samples.is_empty() {
-                self.sample_rate = frame.sample_rate;
-                self.history.push_back(frame.samples.clone());
+            if !frame.data.is_empty() {
+                // TODO: extract from tags.
+                self.sample_rate = 50000.0f32;
+                self.history.push_back(frame.data.clone());
                 while self.history.len() > MAX_WATERFALL_FRAMES {
                     self.history.pop_front();
                 }
@@ -131,16 +134,18 @@ fn draw_graph() -> Result<(), JsValue> {
             ctx.fill_text("Waiting for spectrum data...", 12.0, 20.0)?;
             return Ok(());
         };
-        if frame.samples.is_empty() {
+        if frame.data.is_empty() {
             return Ok(());
         }
+        // TODO: get from tags.
+        let sample_rate = 50000.0f32;
 
         let plot_left = AXIS_MARGIN_LEFT.min((width - 1.0).max(0.0));
         let plot_top = AXIS_MARGIN_TOP.min((height - 1.0).max(0.0));
         let plot_width = (width - AXIS_MARGIN_LEFT - AXIS_MARGIN_RIGHT).max(1.0);
         let plot_height = (height - AXIS_MARGIN_TOP - AXIS_MARGIN_BOTTOM).max(1.0);
 
-        let (mut y_min, mut y_max) = data_range(&frame.samples).unwrap_or((-120.0, 0.0));
+        let (mut y_min, mut y_max) = data_range(frame.data.as_ref()).unwrap_or((-120.0, 0.0));
         if (y_max - y_min).abs() < f32::EPSILON {
             y_min -= 1.0;
             y_max += 1.0;
@@ -158,13 +163,13 @@ fn draw_graph() -> Result<(), JsValue> {
             plot_top,
             plot_width,
             plot_height,
-            frame.sample_rate,
+            sample_rate,
             f64::from(y_min),
             f64::from(y_max),
         )?;
 
         let y_range = f64::from(y_max - y_min).max(1.0e-9);
-        let len = frame.samples.len();
+        let len = frame.data.len();
         let half = len / 2;
         let denom = (len.saturating_sub(1)).max(1) as f64;
 
@@ -172,7 +177,7 @@ fn draw_graph() -> Result<(), JsValue> {
         ctx.set_line_width(1.25);
         ctx.begin_path();
         for i in 0..len {
-            let bin = frame.samples[(i + half) % len];
+            let bin = frame.data[(i + half) % len];
             let x = plot_left + (i as f64 / denom) * plot_width;
             let y = plot_top + plot_height
                 - ((f64::from(bin) - f64::from(y_min)) / y_range) * plot_height;
@@ -523,7 +528,7 @@ fn format_hz(value: f64) -> String {
 }
 
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) fn update(frames: Vec<FloatPduStream>) -> Result<(), JsValue> {
+pub(crate) fn update(frames: Vec<TaggedVec<Float>>) -> Result<(), JsValue> {
     with_spectrum_state(|state| state.set_latest(frames));
     draw_all()
 }

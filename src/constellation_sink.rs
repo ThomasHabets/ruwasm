@@ -7,7 +7,9 @@ use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, Event, HtmlCanvasElement};
 
 use crate::mainthread::get_element;
-use rustradio_ui::ComplexStream;
+
+use rustradio::Complex;
+use rustradio_ui::TaggedVec;
 
 const ID_CONSTELLATION_CANVAS: &str = "constellation-graph";
 const MAX_CONSTELLATION_POINTS: usize = 5_000;
@@ -19,18 +21,10 @@ thread_local! {
 }
 
 struct ConstellationSeries {
-    name: String,
     points: VecDeque<rustradio::Complex>,
 }
 
 impl ConstellationSeries {
-    fn new(name: String) -> Self {
-        Self {
-            name,
-            points: VecDeque::new(),
-        }
-    }
-
     fn append_points(&mut self, points: &[rustradio::Complex]) {
         self.points.extend(points.iter().copied());
         while self.points.len() > MAX_CONSTELLATION_POINTS {
@@ -48,17 +42,14 @@ impl ConstellationState {
         Self { series: Vec::new() }
     }
 
-    fn append_streams(&mut self, streams: &[ComplexStream]) {
-        for stream in streams {
-            let idx = self.series.iter().position(|s| s.name == stream.name);
-            let series = if let Some(i) = idx {
-                &mut self.series[i]
-            } else {
-                self.series
-                    .push(ConstellationSeries::new(stream.name.clone()));
-                self.series.last_mut().expect("series just added")
-            };
-            series.append_points(&stream.samples);
+    fn append_streams(&mut self, streams: &[TaggedVec<Complex>]) {
+        for (idx, stream) in streams.iter().enumerate() {
+            if self.series.len() <= idx {
+                self.series.push(ConstellationSeries {
+                    points: VecDeque::with_capacity(stream.data.len()),
+                });
+            }
+            self.series[idx].append_points(stream.data.as_ref());
         }
     }
 }
@@ -258,7 +249,7 @@ fn format_tick(value: f64) -> String {
 }
 
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) fn update(streams: Vec<ComplexStream>) -> Result<(), JsValue> {
+pub(crate) fn update(streams: Vec<TaggedVec<Complex>>) -> Result<(), JsValue> {
     with_constellation_state(|state| state.append_streams(&streams));
     draw_graph()
 }

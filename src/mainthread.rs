@@ -10,7 +10,6 @@ use rustradio::Complex;
 use rustradio::data_stream::{
     BytesReader, DataStreamId, PROTOCOL_VERSION, Packet, RequestData, SyncWriter,
 };
-use rustradio_ui::FloatStream;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::js_sys;
@@ -21,6 +20,7 @@ use web_sys::{
 
 use crate::js_performance_now;
 use crate::{Ax25Messages, MainToWorker, WorkerToMain};
+use rustradio_ui::SharedVecPtr;
 
 const HTML_DISABLED: &str = "disabled";
 const ID_RESULT: &str = "result";
@@ -47,7 +47,6 @@ enum InputSource {
 
 thread_local! {
     static WORKER: OnceCell<Worker> = const { OnceCell::new() };
-    static LATEST_FLOAT_STREAMS: RefCell<Vec<FloatStream>> = const { RefCell::new(Vec::new()) };
     static FILE: RefCell<Option<File>> = const { RefCell::new(None) };
     static FILE_DATA_STREAM_READER: RefCell<BytesReader> = RefCell::new(BytesReader::new());
     static FILE_DATA_STREAM_VERSION_SENT: Cell<bool> = const { Cell::new(false) };
@@ -58,9 +57,49 @@ thread_local! {
     static WS_SOCKET: RefCell<Option<WebSocket>> = const { RefCell::new(None) };
 }
 
-pub(crate) fn post_message(msg: MainToWorker) -> Result<(), JsValue> {
-    let msg = msg.try_into()?;
+#[allow(clippy::enum_glob_use)]
+fn forget_shared(msg: MainToWorker) {
+    use rustradio_ui::MainToWorker::*;
+    match msg {
+        // Ignore all the messages that don't have shared data.
+        Start(_) | ApplicationSpecific(_) | DataStream(_) | Ping(_) | Pong(_) => {}
+        SharedByte(_, v) => {
+            for e in v {
+                e.forget();
+            }
+        }
+    }
+}
+
+#[allow(clippy::enum_glob_use)]
+fn drop_shared(msg: MainToWorker) {
+    use rustradio_ui::MainToWorker::*;
+    match msg {
+        // Ignore all the messages that don't have shared data.
+        Start(_) | ApplicationSpecific(_) | DataStream(_) | Ping(_) | Pong(_) => {}
+        SharedByte(_, v) => {
+            for e in v {
+                let _ = e.into_vec();
+            }
+        }
+    }
+}
+fn post_message_inner(msg: &MainToWorker) -> Result<(), JsValue> {
+    let msg = serde_wasm_bindgen::to_value(msg)?;
     worker().post_message(&msg)
+}
+
+pub(crate) fn post_message(msg: MainToWorker) -> Result<(), JsValue> {
+    match post_message_inner(&msg) {
+        Ok(()) => {
+            forget_shared(msg);
+            Ok(())
+        }
+        Err(e) => {
+            drop_shared(msg);
+            Err(e)
+        }
+    }
 }
 
 async fn read_data(start: u64, size: u64) -> Result<Vec<u8>, JsValue> {
@@ -302,9 +341,44 @@ fn close_websocket_after_error(err: &JsValue) {
 /// Handle message sent from the worker.
 async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
     match e.data().try_into()? {
-        WorkerToMain::ApplicationSpecific(Ax25Messages::Decoded(x)) => {
-            set_content(ID_RESULT, &format!("Decoded: {x:?}"))?;
+        WorkerToMain::SharedFloat(name, streams) => {
+            let streams = streams
+                .into_iter()
+                .map(rustradio_ui::SharedVecPtr::into_vec)
+                .collect();
+            match name.as_str() {
+                "iq_mag" => crate::time_sink::update(streams)?,
+                "iq_spectrum" => crate::spectrum_sink::update(streams)?,
+                other => log::error!("Unknown float vec: {other}"),
+            }
         }
+        WorkerToMain::SharedComplex(name, streams) => {
+            assert_eq!(name, "iq_constellation");
+            let streams: Vec<_> = streams
+                .into_iter()
+                .map(rustradio_ui::SharedVecPtr::into_vec)
+                .collect();
+            crate::constellation_sink::update(streams)?;
+        }
+        /*
+        Ax25Messages::FloatPduStreams(streams) => {
+            let streams: Vec<_> = streams
+                .into_iter()
+                .map(|s| FloatPduStream {
+                    name: s.name,
+                    tags: s.tags,
+                    sample_rate: 1000.0, // TODO
+                    samples: SharedVec::new(s.vec, post_release_shared_buffer),
+                })
+                .collect();
+            crate::spectrum_sink::update(streams)?;
+        }
+        */
+        WorkerToMain::ApplicationSpecific(msg) => match msg {
+            Ax25Messages::Decoded(x) => {
+                set_content(ID_RESULT, &format!("Decoded: {x:?}"))?;
+            }
+        },
         WorkerToMain::DataStream(data) => {
             debug!(
                 "Main: handling {} DATA_STREAM byte(s) from worker",
@@ -322,35 +396,7 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
         WorkerToMain::LogLine { level, line } => {
             log::log!(level, "[worker] {line}");
         }
-        WorkerToMain::FloatStreams(streams) => {
-            let lens: Vec<_> = streams.iter().map(|s| s.samples.len()).collect();
-            let n = lens[0].min(10);
-            debug!(
-                "Main: received {} float stream(s) lens {lens:?}. A few samples: {:?}",
-                streams.len(),
-                &streams[0].samples[..n]
-            );
-            for (n, s) in streams.iter().enumerate() {
-                debug!("Stream {n} name {}", s.name);
-            }
-            crate::time_sink::update(streams)?;
-        }
-        WorkerToMain::ComplexStreams(streams) => {
-            let lens: Vec<_> = streams.iter().map(|s| s.samples.len()).collect();
-            debug!(
-                "Main: received {} complex stream(s) lens {lens:?}",
-                streams.len()
-            );
-            crate::constellation_sink::update(streams)?;
-        }
-        WorkerToMain::FloatPduStreams(streams) => {
-            let lens: Vec<_> = streams.iter().map(|s| s.samples.len()).collect();
-            debug!(
-                "Main: received {} float PDU stream(s) lens {lens:?}",
-                streams.len()
-            );
-            crate::spectrum_sink::update(streams)?;
-        }
+        WorkerToMain::FloatStreams(_) | WorkerToMain::ComplexStreams(_) => {}
         WorkerToMain::Ping(t) => {
             post_message(MainToWorker::Pong(t)).unwrap();
         }
@@ -482,15 +528,29 @@ async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> 
         };
 
         log::trace!("Read {} bytes from rtlsdr", bytes.len());
-        let packet = rustradio::data_stream::PacketRef::Data {
-            stream_id: &rustradio::data_stream::DataStreamId::new("rtl-sdr"),
-            //stream_id: "rtl-sdr".into(),
-            data: &bytes,
-        };
-        let mut buf = Vec::new();
-        let mut w = rustradio::data_stream::SyncWriter::new(&mut buf);
-        w.write_packet(packet)?;
-        post_message(MainToWorker::DataStream(buf))?;
+        post_message(MainToWorker::SharedByte(
+            "rtl-sdr".into(),
+            vec![SharedVecPtr::new(bytes, &[])],
+        ))?;
+    }
+}
+
+#[wasm_bindgen]
+pub fn wasm_memory_is_shared() -> bool {
+    use js_sys::Reflect;
+
+    let memory = wasm_bindgen::memory();
+
+    let buffer = Reflect::get(&memory, &JsValue::from_str("buffer")).expect("memory.buffer");
+
+    // SharedArrayBuffer exists only when cross-origin isolation permits it.
+    let sab_ctor = js_sys::global().unchecked_into::<js_sys::Object>();
+
+    let shared_array_buffer = Reflect::get(&sab_ctor, &JsValue::from_str("SharedArrayBuffer")).ok();
+
+    match shared_array_buffer {
+        Some(ctor) if !ctor.is_undefined() => buffer.is_instance_of::<js_sys::SharedArrayBuffer>(),
+        _ => false,
     }
 }
 

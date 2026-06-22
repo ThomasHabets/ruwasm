@@ -48,12 +48,10 @@ impl WasmGraph {
                     // TODO: Skip calling next time if conditions not met?
                     BlockRet::WaitForStream(s, _) => {
                         let closed = s.closed();
-                        drop(ret);
                         if b.eof() && closed {
                             eof[n] = true;
                         }
                     }
-                    BlockRet::WaitForFunc(_) => {}
                     BlockRet::Pending => {
                         //info!("Block {name} returned Pending");
                         need_more = true;

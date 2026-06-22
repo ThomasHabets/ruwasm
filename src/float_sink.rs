@@ -2,11 +2,12 @@
 use rustradio::block::{Block, BlockRet};
 use rustradio::stream::ReadStream;
 use rustradio::{Error, Float};
-use rustradio_ui::FloatStreamRef;
+use rustradio_ui::SharedVecPtr;
 
 use crate::worker::post_message;
 
-type WorkerToMainRef<'a> = rustradio_ui::WorkerToMainRef<'a, rustradio_ui::AppEmpty>;
+//type WorkerToMain = rustradio_ui::WorkerToMain<rustradio_ui::AppEmpty>;
+use crate::WorkerToMain;
 
 /// A block that takes float data from its input and posts it to the main UI
 /// thread.
@@ -25,14 +26,10 @@ impl Block for FloatSink {
         let (input, tags) = self.src.read_buf()?;
         let ilen = input.len();
         if ilen > 0 {
-            post_message(&WorkerToMainRef::FloatStreams(vec![
-                FloatStreamRef {
-                    name: &self.name,
-                    tags: tags.as_slice(),
-                    samples: input.slice(),
-                }
-                .into(),
-            ]))
+            post_message(WorkerToMain::SharedFloat(
+                self.name.clone(),
+                vec![SharedVecPtr::new(input.slice(), tags)],
+            ))
             .map_err(|e| Error::msg(format!("post float streams: {e:?}")))?;
             input.consume(ilen);
         }

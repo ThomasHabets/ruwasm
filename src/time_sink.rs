@@ -10,13 +10,15 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 
 use log::debug;
-use rustradio_ui::FloatStream;
 use wasm_bindgen::prelude::*;
 use web_sys::{
     CanvasRenderingContext2d, Event, HtmlButtonElement, HtmlCanvasElement, HtmlInputElement,
 };
 
 use crate::mainthread::get_element;
+
+use rustradio::Float;
+use rustradio_ui::TaggedVec;
 
 const ID_GRAPH_CANVAS: &str = "float-graph";
 const ID_GRAPH_Y_MIN: &str = "graph-y-min";
@@ -40,20 +42,11 @@ thread_local! {
 
 /// TODO: this is wrong. The series should be aligned, not treated separately.
 struct GraphSeries {
-    name: String,
     start_index: u64,
     samples: VecDeque<f32>,
 }
 
 impl GraphSeries {
-    fn new(name: String) -> Self {
-        Self {
-            name,
-            start_index: 0,
-            samples: VecDeque::new(),
-        }
-    }
-
     fn append_samples(&mut self, samples: &[f32]) {
         self.samples.extend(samples.iter().copied());
         while self.samples.len() > MAX_GRAPH_POINTS {
@@ -90,16 +83,15 @@ impl GraphState {
         }
     }
 
-    fn append_streams(&mut self, streams: &[FloatStream]) {
-        for stream in streams {
-            let idx = self.series.iter().position(|s| s.name == stream.name);
-            let series = if let Some(i) = idx {
-                &mut self.series[i]
-            } else {
-                self.series.push(GraphSeries::new(stream.name.clone()));
-                self.series.last_mut().expect("series just added")
-            };
-            series.append_samples(&stream.samples);
+    fn append_streams(&mut self, streams: &[TaggedVec<Float>]) {
+        for (idx, stream) in streams.iter().enumerate() {
+            if self.series.len() <= idx {
+                self.series.push(GraphSeries {
+                    start_index: 0,
+                    samples: VecDeque::with_capacity(stream.data.len()),
+                });
+            }
+            self.series[idx].append_samples(stream.data.as_ref());
         }
     }
 }
@@ -521,7 +513,7 @@ fn parse_f32_input(id: &str) -> Result<f32, JsValue> {
 }
 
 #[allow(clippy::needless_pass_by_value)]
-pub(crate) fn update(streams: Vec<FloatStream>) -> Result<(), JsValue> {
+pub(crate) fn update(streams: Vec<TaggedVec<Float>>) -> Result<(), JsValue> {
     with_graph_state(|state| state.append_streams(&streams));
     draw_graph()
 }

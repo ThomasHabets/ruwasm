@@ -40,9 +40,75 @@ thread_local! {
     static DATA_STREAM: RefCell<DataStream> = RefCell::new(DataStream::new());
 }
 
+#[allow(clippy::enum_glob_use)]
+fn forget_shared<T: rustradio_ui::ApplicationSpecific>(msg: rustradio_ui::WorkerToMain<T>) {
+    use rustradio_ui::WorkerToMain::*;
+    match msg {
+        // Ignore all the messages that don't have shared data.
+        Ready(_)
+        | ApplicationSpecific(_)
+        | Ping(_)
+        | Pong(_)
+        | DataStream(_)
+        | End(_)
+        | LogLine { .. }
+        | FloatStreams(_)
+        | ComplexStreams(_) => {}
+        SharedFloat(_, v) => {
+            for e in v {
+                e.forget();
+            }
+        }
+        SharedComplex(_, v) => {
+            for e in v {
+                e.forget();
+            }
+        }
+    }
+}
+
+#[allow(clippy::enum_glob_use)]
+fn drop_shared<T: rustradio_ui::ApplicationSpecific>(msg: rustradio_ui::WorkerToMain<T>) {
+    use rustradio_ui::WorkerToMain::*;
+    match msg {
+        // Ignore all the messages that don't have shared data.
+        Ready(_)
+        | ApplicationSpecific(_)
+        | Ping(_)
+        | Pong(_)
+        | DataStream(_)
+        | End(_)
+        | LogLine { .. }
+        | FloatStreams(_)
+        | ComplexStreams(_) => {}
+        SharedFloat(_, v) => {
+            for e in v {
+                let _ = e.into_vec();
+            }
+        }
+        SharedComplex(_, v) => {
+            for e in v {
+                let _ = e.into_vec();
+            }
+        }
+    }
+}
+
 /// Post a message to the main UI.
-// TODO: probably should restrict this to only WorkerToMain and WorkerToMainRef.
-pub(crate) fn post_message<T: Serialize + ?Sized>(msg: &T) -> Result<(), JsValue> {
+pub(crate) fn post_message(msg: WorkerToMain) -> Result<(), JsValue> {
+    match post_message_ref(&msg) {
+        Ok(()) => {
+            forget_shared(msg);
+            Ok(())
+        }
+        Err(e) => {
+            drop_shared(msg);
+            Err(e)
+        }
+    }
+}
+
+pub(crate) fn post_message_ref<T: Serialize + ?Sized>(msg: &T) -> Result<(), JsValue> {
     let msg = serde_wasm_bindgen::to_value(msg)?;
     let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
     scope.post_message(&msg)
@@ -94,7 +160,7 @@ pub(crate) fn request_receiver_data(
     match request_state {
         RequestState::Waiting => Ok(()),
         RequestState::Issued(packet) => {
-            post_message(&WorkerToMain::DataStream(packet))
+            post_message(WorkerToMain::DataStream(packet))
                 .map_err(|e| rustradio::Error::msg(format!("{e:?}")))?;
             Ok(())
         }
@@ -144,13 +210,27 @@ async fn handle_data_stream_bytes(data: &[u8]) -> Result<(), JsValue> {
 /// Handle message sent from Main thread to worker.
 async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
     match event.data().try_into()? {
+        MainToWorker::SharedByte(name, streams) => {
+            assert_eq!(name, "rtl-sdr");
+            let streams: Vec<_> = streams
+                .into_iter()
+                .map(rustradio_ui::SharedVecPtr::into_vec)
+                .collect();
+            //handle_data_stream_bytes(&bytes).await?;
+            // TODO: avoid this copy.
+            send_source_msg(
+                name.clone().into(),
+                wasm_source::Msg::Extend(streams[0].data.clone()),
+            )
+            .await?;
+        }
         MainToWorker::Start(crate::Ax25Start { samp_rate, rtlsdr }) => {
             debug!("Got MainToWorker::Start");
             // Run the decoder.
             let o = radio_1200(samp_rate, rtlsdr).await?;
             // Using reference serialization here doesn't actually help, but it
             // does work.
-            post_message(&WorkerToMainRef::End(crate::Ax25EndRef { s: &o }))?;
+            post_message_ref(&WorkerToMainRef::End(crate::Ax25EndRef { s: &o }))?;
         }
         MainToWorker::DataStream(data) => {
             trace!("Worker: Got DATA_STREAM bytes len {}", data.len());
@@ -158,7 +238,7 @@ async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
         }
         MainToWorker::Ping(t) => {
             info!("Worker: Got ping");
-            post_message(&WorkerToMain::Pong(t))?;
+            post_message(WorkerToMain::Pong(t))?;
         }
         MainToWorker::Pong(from) => {
             let to = js_performance_now();
@@ -200,7 +280,7 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
     global.set_onmessageerror(Some(onmsgerr.as_ref().unchecked_ref()));
     onmsgerr.forget();
 
-    post_message(&WorkerToMain::Ready(crate::Ax25Ready {}))?;
+    post_message(WorkerToMain::Ready(crate::Ax25Ready {}))?;
     info!("Done setting up worker");
 
     Ok(())
@@ -296,7 +376,7 @@ async fn radio_1200(samp_rate: u64, rtlsdr: bool) -> rustradio::Result<String> {
                     } else {
                         info!("Parsed: {packet:?}");
                     }
-                    post_message(&WorkerToMain::ApplicationSpecific(Ax25Messages::Decoded(
+                    post_message(WorkerToMain::ApplicationSpecific(Ax25Messages::Decoded(
                         format!("Last decode: {packet:?}"),
                     )))
                     .unwrap();

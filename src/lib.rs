@@ -5,6 +5,7 @@
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::cast_possible_truncation)]
 // TODO: fix some of the above
+//
 use log::info;
 use rustradio::data_stream::DataStreamId;
 use serde::{Deserialize, Serialize};
@@ -120,7 +121,6 @@ pub async fn start() -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
     if web_sys::window().is_none() {
         use rayon::prelude::*;
-
         // With shared memory, the worker and UI have the same logger.
         info!("Worker: Starting at time {}", js_performance_now());
         info!(
