@@ -1,6 +1,6 @@
 {
     "envs": {
-	"RUSTFLAGS": "--deny warnings",
+	"RUSTFLAGS_TMP": "--deny warnings",
 	"CARGO_TERM_COLOR": "always"
     },
     "parallel_regex": [

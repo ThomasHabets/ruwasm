@@ -1,5 +1,5 @@
 // Minimal necessary code to start a worker sharing RAM with the main UI thread.
-import init, { start } from "./ruwasm.js";
+import init, { start, initThreadPool } from "./ruwasm.js";
 Error.stackTraceLimit = Infinity;
 
 const wasmMemoryConfig = {
@@ -35,6 +35,9 @@ if (globalThis.window) {
   globalThis.__ruwasmMemory = memory;
   globalThis.__ruwasmModule = module;
   await init({ module_or_path: module, memory });
+  console.log("About to init thread pool");
+  await initThreadPool(navigator.hardwareConcurrency);
+  console.log("Thread pool inited");
   await start();
 } else {
   globalThis.addEventListener("message", async function onInit(event) {

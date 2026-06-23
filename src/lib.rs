@@ -12,6 +12,10 @@ use wasm_bindgen::prelude::*;
 
 use rustradio_ui::ApplicationSpecific;
 
+// This needs to be re-exported to JS, per
+// <https://github.com/RReverser/wasm-bindgen-rayon>.
+pub use wasm_bindgen_rayon::init_thread_pool;
+
 mod complex_sink;
 mod constellation_sink;
 mod data_stream;
@@ -115,8 +119,14 @@ struct Ax25Ready {}
 pub async fn start() -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
     if web_sys::window().is_none() {
+        use rayon::prelude::*;
+
         // With shared memory, the worker and UI have the same logger.
         info!("Worker: Starting at time {}", js_performance_now());
+        info!(
+            "rayon test: {}",
+            (0..10u64).into_par_iter().map(|v| v).sum::<u64>()
+        );
         worker::setup().await
     } else {
         domlogger::init_logging().expect("failed to init logging");
