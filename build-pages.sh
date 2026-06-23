@@ -11,7 +11,7 @@ mkdir -p "$OUTDIR"
 
 GIT="$(git describe --tags --dirty --always)"
 wasm-pack build --target web -d "$OUTDIR/$PREFIX"
-cp "$WEBD/index.html" "$WEBD/style.css" "$WEBD/wasm-mod.js" "$OUTDIR/$PREFIX/"
+cp "$WEBD/index.html" "$WEBD/style.css" "$WEBD/wasm-mod.js" "$WEBD/coi-serviceworker.min.js" "$OUTDIR/$PREFIX/"
 sed -i "s/GIT_VERSION_NOT_SET/$GIT/g" "$OUTDIR/$PREFIX/index.html"
 
 # publish contents of ruwasm/ at site root
