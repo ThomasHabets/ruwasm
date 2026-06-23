@@ -62,6 +62,30 @@ cargo run --bin ws_stdout -- \
 
 Don't forget to tick the RTL-SDR format checkbox in the UI.
 
+## Life of a WASM worker
+
+The bootstrapping of WASM has a few steps, even though wasm-pack and
+`wasm_bindgen` hide a lot of complexity.
+
+First the HTML imports `web/wasm-mod.js` as a JS module. That file has our WASM
+bootstrapping code, and is the only non-generated JS in this project.
+
+This javascript creates the shared memory area, initializes the main UI WASM,
+and then starts it by calling the async function `src/lib.rs:start()`. The main
+UI thread is thereby done with JS, and will only run Rust WASM from now on.
+
+After setting up logging, the main UI thread starts the worker, in
+`src/mainthread.rs:worker()`. Like the HTML, it points back to
+`web/wasm-mod.js` to load the WASM.
+
+The JS detects that it is now running in the worker, and therefore waits to
+receive the `WebAssembly.Memory`. It then uses the memory to initialize the
+worker WASM. Then it starts the worker, and no more JS will execute.
+
+After that, all communication between main thread and worker happens via
+`post_message()`, defined both in `src/mainthread.rs` and `src/worker.rs`,
+depending on which code is running.
+
 ## Useful links
 
 * <https://notes.brooklynzelenka.com/Blog/Notes-on-Writing-Wasm>

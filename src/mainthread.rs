@@ -1,5 +1,4 @@
 // This file is for stuff in the main (UI) thread.
-
 use std::cell::Cell;
 use std::cell::OnceCell;
 use std::cell::RefCell;
@@ -653,7 +652,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
 }
 
 /// Give us the worker.
-fn worker() -> Worker {
+pub(crate) fn worker() -> Worker {
     WORKER.with(|cell| {
         cell.get_or_init(|| {
             info!("Main: Starting the worker");
@@ -661,10 +660,15 @@ fn worker() -> Worker {
             opts.set_type(web_sys::WorkerType::Module);
             opts.set_name("RustRadio worker");
             let worker = Worker::new_with_options("./wasm-mod.js", &opts).unwrap();
+            let mut bootstrapped = false;
 
             // Set message handler.
             let onmessage = Closure::<dyn FnMut(MessageEvent) -> Result<(), JsValue>>::new(
                 move |e: MessageEvent| {
+                    if !bootstrapped {
+                        bootstrapped = crate::start_worker::msg(&e);
+                        return Ok(());
+                    }
                     spawn_local(async move {
                         if let Err(e) = worker_msg(e).await {
                             error!("Main: Inner receiver thing: {e:?}");

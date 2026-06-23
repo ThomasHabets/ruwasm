@@ -21,11 +21,11 @@ mod float_pdu_sink;
 mod float_sink;
 mod mainthread;
 mod spectrum_sink;
+mod start_worker;
 mod time_sink;
 mod wasm_graph;
 mod wasm_source;
 mod worker;
-mod workerlogger;
 
 type MainToWorker = rustradio_ui::MainToWorker<Ax25MainToWorker>;
 type WorkerToMain = rustradio_ui::WorkerToMain<Ax25WorkerToMain>;
@@ -111,21 +111,16 @@ struct Ax25Ready {}
 ///
 /// This function is run for both, and it does common initialization and then
 /// calls out to the respective special setups.
-#[wasm_bindgen(start)]
+#[wasm_bindgen]
 pub async fn start() -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
     if web_sys::window().is_none() {
-        // Init logging.
-        workerlogger::init_logging().expect("Failed to init worker logging");
-        // console_log::init_with_level(log::Level::Debug).expect("Failed to init logging");
-        info!("Worker logging initialized");
+        // With shared memory, the worker and UI have the same logger.
         info!("Worker: Starting at time {}", js_performance_now());
-
         worker::setup().await
     } else {
-        info!("Main: Starting at time {}", js_performance_now());
         domlogger::init_logging().expect("failed to init logging");
-        info!("Main logging initialized");
+        info!("Main: Starting at time {}", js_performance_now());
         mainthread::setup().await
     }
 }
