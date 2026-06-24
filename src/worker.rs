@@ -212,7 +212,7 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
 /// function doesn't return until an EOF has come in.
 #[allow(clippy::too_many_lines)]
 async fn radio_1200(samp_rate: u64, rtlsdr: bool) -> rustradio::Result<String> {
-    info!("AX.25 1200 decoder running");
+    info!("AX.25 1200 decoder running with sample rate {samp_rate} IF rate {IF_SAMPLE_RATE}");
 
     // Decoder parameters.
     let samp_rate = samp_rate as f32;
