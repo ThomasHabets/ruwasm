@@ -3,6 +3,7 @@ build-std = ["panic_abort", "std"]
 
 [target.wasm32-unknown-unknown]
 rustflags = [
+    #"-g",
     # memory64 not supported by rustc, but supported by chrome
     "-C", "target-feature=+atomics,+bulk-memory,+mutable-globals,+simd128,+relaxed-simd,+sign-ext,+nontrapping-fptoint,+reference-types,+multivalue,+tail-call",
     "-C", "link-arg=--shared-memory",

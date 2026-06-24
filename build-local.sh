@@ -4,7 +4,7 @@ WEBD="web"
 PREFIX="ruwasm"
 TMPD="$(mktemp -d)"
 if [[ ${1:-release} = "release" ]]; then
-        wasm-pack build --target web -d "$TMPD/$PREFIX" --release
+        wasm-pack build --target web -d "$TMPD/$PREFIX" --profiling
 else
         wasm-pack build --target web -d "$TMPD/$PREFIX" --dev
 fi

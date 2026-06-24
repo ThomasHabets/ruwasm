@@ -62,8 +62,15 @@ features = [
 crate-type = ["cdylib"]  # <-- THIS IS CRITICAL
 [profile.release]
 debug = true
+#strip = false
 
 [patch.crates-io]
 #rtlsdr-pure = { path = "../rtlsdr-pure" }
 #cross_usb = { path = "../rtlsdr-pure/vendor/cross_usb" }
 #rustradio-ui = { path = "../rustradio/rustradio-ui" }
+
+
+[package.metadata.wasm-pack.profile.profiling]
+# wasm-bindgen, called by wasm-pack, needs to be told to keep debug info in
+# profiling profile.
+wasm-opt = ["-O", "-g"]
