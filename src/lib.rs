@@ -7,11 +7,11 @@
 // TODO: fix some of the above
 //
 use log::info;
+use rustradio::Float;
 use rustradio::data_stream::DataStreamId;
+use rustradio_ui::ApplicationSpecific;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
-
-use rustradio_ui::ApplicationSpecific;
 
 // This needs to be re-exported to JS, per
 // <https://github.com/RReverser/wasm-bindgen-rayon>.
@@ -20,7 +20,6 @@ pub use wasm_bindgen_rayon::init_thread_pool;
 mod complex_sink;
 mod constellation_sink;
 mod data_stream;
-mod decim5;
 mod domlogger;
 mod float_pdu_sink;
 mod float_sink;
@@ -61,6 +60,7 @@ enum Ax25Messages {
 #[derive(Debug, Serialize, Deserialize)]
 struct Ax25Start {
     samp_rate: u64,
+    offset: Float,
     rtlsdr: bool,
 }
 

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use log::{debug, error, info, warn};
-use rustradio::Complex;
+use rustradio::Float;
 use rustradio::data_stream::{
     BytesReader, DataStreamId, PROTOCOL_VERSION, Packet, RequestData, SyncWriter,
 };
@@ -37,7 +37,7 @@ const ID_AUDIO_VOLUME: &str = "input-audio-volume";
 const ID_HTML: &str = "root-html";
 const ID_RTLSDR: &str = "btn-rtlsdr";
 const ID_RTLSDR_FREQUENCY: &str = "input-rtlsdr-frequency";
-const ID_RTLSDR_OFFSET: &str = "input-rtlsdr-offset";
+const ID_OFFSET: &str = "input-offset";
 const ID_RTLSDR_GAIN_AUTO: &str = "input-rtlsdr-gain-auto";
 const ID_RTLSDR_GAIN: &str = "input-rtlsdr-gain";
 const AUDIO_SAMPLE_RATE: f32 = 44_100.0;
@@ -561,10 +561,6 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
     Ok(())
 }
 
-fn rtlsdr_encode_sample(sample: f32) -> u8 {
-    ((sample / 0.008) + 127.0).round().clamp(0.0, 255.0) as u8
-}
-
 /// Convert the RTL-SDR gain controls into the device gain mode.
 fn rtlsdr_gain_mode() -> Result<rtlsdr_pure::GainMode, JsValue> {
     if get_element(ID_RTLSDR_GAIN_AUTO)?
@@ -618,7 +614,11 @@ fn update_rtlsdr_gain_control_state() -> Result<(), JsValue> {
 
 #[allow(clippy::too_many_lines)]
 async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> {
-    let sample_rate = 250_000u32;
+    let sample_rate: u32 = get_element(ID_SAMP_RATE)?
+        .dyn_into::<web_sys::HtmlInputElement>()?
+        .value()
+        .parse()
+        .map_err(|e| JsValue::from_str(&format!("parsing sample rate: {e}")))?;
     let gain_mode = rtlsdr_gain_mode()?;
 
     let freq: i32 = get_element(ID_RTLSDR_FREQUENCY)?
@@ -626,11 +626,12 @@ async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> 
         .value()
         .parse()
         .map_err(|e| JsValue::from_str(&format!("parsing sample rate: {e}")))?;
-    let offset: i32 = get_element(ID_RTLSDR_OFFSET)?
+    let offset: i32 = get_element(ID_OFFSET)?
         .dyn_into::<web_sys::HtmlInputElement>()?
         .value()
         .parse()
         .map_err(|e| JsValue::from_str(&format!("parsing sample rate: {e}")))?;
+    info!("KEFFO offset {offset}");
     let freq = u32::try_from(freq - offset).map_err(|_e| {
         JsValue::from_str(&format!("frequency {freq} can't subtract offset {offset}"))
     })?;
@@ -678,12 +679,8 @@ async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> 
     // let read_len = 65536usize; // at 250ksps this is a 262ms. Or is it double
     // that?
     let read_len = 16384usize; // at 250ksps this is a 65ms. 16384/250000
-    info!("Reading from rtlsdr");
-    let phase_step = -std::f32::consts::TAU * (offset as f32) / (actual_rate as f32);
-    let rotation = Complex::new(phase_step.cos(), phase_step.sin());
-    let mut oscillator = Complex::new(1.0, 0.0);
 
-    info!("Running the loop");
+    info!("Running the rtlsdr loop");
     let mut deadline = js_performance_now() + 1000.0f64; // One second. Basically infinite time.
     loop {
         let now = js_performance_now();
@@ -697,43 +694,6 @@ async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> 
         deadline =
             js_performance_now() + 1_000.0f64 * ((bytes.len() / 2) as f64) / f64::from(actual_rate);
         assert!(bytes.len().is_multiple_of(2));
-
-        let bytes: Vec<u8> = if offset != 0 {
-            // Convert to complex.
-            let iq: Vec<_> = bytes
-                .chunks_exact(2)
-                .map(|s| {
-                    let x = rustradio::Complex::new(
-                        (f32::from(s[0]) - 127.0) * 0.008,
-                        (f32::from(s[1]) - 127.0) * 0.008,
-                    );
-                    let shifted = x * oscillator;
-                    oscillator *= rotation;
-                    shifted
-                })
-                .collect();
-            let osc_norm = oscillator.norm();
-            if osc_norm > 0.0 {
-                oscillator /= osc_norm;
-            }
-
-            // Filter & decimate.
-            let iq = crate::decim5::decim5(&iq);
-            //let iq: Vec<_> = iq.into_iter().step_by(5).collect();
-
-            // Convert back to bytes.
-            iq.iter()
-                .flat_map(|s| [rtlsdr_encode_sample(s.re), rtlsdr_encode_sample(s.im)])
-                .collect()
-        } else {
-            // TODO: we should filter.
-            bytes
-                .chunks_exact(2)
-                .step_by(5)
-                .flat_map(|pair| pair.iter().copied())
-                .collect()
-        };
-
         log::trace!("Read {} bytes from rtlsdr", bytes.len());
         post_message(MainToWorker::SharedByte(
             "rtl-sdr".into(),
@@ -866,14 +826,24 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
                 .value()
                 .parse()
                 .map_err(|e| JsValue::from_str(&format!("parsing sample rate: {e}")))?;
+            let offset: Float = get_element(ID_OFFSET)?
+                .dyn_into::<web_sys::HtmlInputElement>()?
+                .value()
+                .parse()
+                .map_err(|e| JsValue::from_str(&format!("parsing offset rate: {e}")))?;
+            info!("HABETS offset {offset}");
             let rtlsdr = get_element(ID_RTLSDR_FORMAT)?
                 .dyn_into::<web_sys::HtmlInputElement>()?
                 .checked();
             // TODO: hard coded here.
-            crate::time_sink::set_sample_rate(1000.0);
+            crate::time_sink::set_sample_rate(samp_rate as f64);
             ensure_audio_playback()?;
             reset_audio_schedule();
-            post_message(MainToWorker::Start(crate::Ax25Start { samp_rate, rtlsdr }))?;
+            post_message(MainToWorker::Start(crate::Ax25Start {
+                samp_rate,
+                offset,
+                rtlsdr,
+            }))?;
             get_element(ID_FILE_INPUT)?
                 .dyn_into::<HtmlInputElement>()?
                 .set_disabled(false);
@@ -882,9 +852,6 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
                 .set_disabled(false);
             if rtlsdr {
                 get_element(ID_RTLSDR_FREQUENCY)?
-                    .dyn_into::<HtmlInputElement>()?
-                    .set_disabled(false);
-                get_element(ID_RTLSDR_OFFSET)?
                     .dyn_into::<HtmlInputElement>()?
                     .set_disabled(false);
                 set_rtlsdr_gain_controls_enabled(true)?;
@@ -897,6 +864,9 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
                 .set_disabled(false);
             get_element(ID_START)?
                 .dyn_into::<web_sys::HtmlButtonElement>()?
+                .set_disabled(true);
+            get_element(ID_OFFSET)?
+                .dyn_into::<web_sys::HtmlInputElement>()?
                 .set_disabled(true);
             get_element(ID_SAMP_RATE)?
                 .dyn_into::<web_sys::HtmlInputElement>()?
@@ -1217,9 +1187,6 @@ fn disable_input_selectors() -> Result<(), JsValue> {
 
     // RTL-SDR
     get_element(ID_RTLSDR_FREQUENCY)?
-        .dyn_into::<HtmlInputElement>()?
-        .set_disabled(true);
-    get_element(ID_RTLSDR_OFFSET)?
         .dyn_into::<HtmlInputElement>()?
         .set_disabled(true);
     set_rtlsdr_gain_controls_enabled(false)?;

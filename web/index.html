@@ -67,7 +67,10 @@
         <div id="form-rr" class="panel-body control-stack">
           <div class="field-group">
             <label for="input-samp-rate">Sample rate</label>
-            <input id="input-samp-rate" type="number" min="1" step="1" value="50000" inputmode="numeric">
+            <input id="input-samp-rate" type="number" min="1" step="1" value="250000" inputmode="numeric">
+            <label for="input-offset">Tune offset (Hz)</label>
+            <input id="input-offset" type="number" min="0" step="1"
+                    value="25000" inputmode="numeric">
           </div>
           <label class="checkbox-field" for="input-rtlsdr-format">
             <input id="input-rtlsdr-format" type="checkbox">
@@ -112,9 +115,6 @@
             <label for="input-rtlsdr-frequency">Frequency (Hz)</label>
             <input id="input-rtlsdr-frequency" type="number" min="1" step="1"
                     value="144800000" inputmode="numeric" disabled>
-            <label for="input-rtlsdr-offset">Tune offset (Hz)</label>
-            <input id="input-rtlsdr-offset" type="number" min="0" step="1"
-                    value="0" inputmode="numeric" disabled>
             <label class="checkbox-field" for="input-rtlsdr-gain-auto">
               <input id="input-rtlsdr-gain-auto" type="checkbox" checked disabled>
               <span>Automatic tuner gain</span>

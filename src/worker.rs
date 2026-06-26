@@ -3,6 +3,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use rustradio::Float;
 use rustradio::blockchain;
 #[allow(clippy::wildcard_imports)]
 use rustradio::blocks::*;
@@ -10,7 +11,7 @@ use rustradio::data_stream::DataStreamId;
 use rustradio::graph::GraphRunner;
 use rustradio::stream::ReadStream;
 
-use log::{debug, error, info, trace, warn};
+use log::{error, info, trace, warn};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
@@ -225,10 +226,14 @@ async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
             )
             .await?;
         }
-        MainToWorker::Start(crate::Ax25Start { samp_rate, rtlsdr }) => {
-            debug!("Got MainToWorker::Start");
+        MainToWorker::Start(crate::Ax25Start {
+            samp_rate,
+            offset,
+            rtlsdr,
+        }) => {
+            info!("Got MainToWorker::Start sample rate {samp_rate} offset {offset}");
             // Run the decoder.
-            let o = radio_1200(samp_rate, rtlsdr).await?;
+            let o = radio_1200(samp_rate, offset, rtlsdr).await?;
             // Using reference serialization here doesn't actually help, but it
             // does work.
             post_message_ref(&WorkerToMainRef::End(crate::Ax25EndRef { s: &o }))?;
@@ -292,8 +297,10 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
 /// The input comes in via GraphComms into the WasmSource block, so this
 /// function doesn't return until an EOF has come in.
 #[allow(clippy::too_many_lines)]
-async fn radio_1200(samp_rate: u64, rtlsdr: bool) -> rustradio::Result<String> {
-    info!("AX.25 1200 decoder running with sample rate {samp_rate} IF rate {IF_SAMPLE_RATE}");
+async fn radio_1200(samp_rate: u64, offset: Float, rtlsdr: bool) -> rustradio::Result<String> {
+    info!(
+        "AX.25 1200 decoder running with sample rate {samp_rate} IF rate {IF_SAMPLE_RATE}, offset {offset}"
+    );
 
     // Decoder parameters.
     let samp_rate = samp_rate as f32;
@@ -321,20 +328,15 @@ async fn radio_1200(samp_rate: u64, rtlsdr: bool) -> rustradio::Result<String> {
     let prev = blockchain![
         g,
         prev,
-        FftFilter::new(
-            prev,
-            rustradio::fir::low_pass_complex(
-                samp_rate,
-                20_000.0,
-                100.0,
-                &rustradio::window::WindowType::Hamming
-            )
-        ),
-        RationalResampler::builder()
-            .deci(samp_rate as usize)
-            .interp(if_rate as usize)
-            .build(prev)
-            .map_err(|e| rustradio::Error::wrap(e, "rational resampler"))?,
+        FirFilter::builder(rustradio::fir::low_pass_complex(
+            samp_rate,
+            10_000.0,
+            15_000.0,
+            &rustradio::window::WindowType::Hamming
+        ))
+        .deci(5)
+        .translate(samp_rate, offset)
+        .build(prev),
     ];
     let prev = add_spectrum_tap(&mut g, prev);
     let prev = add_viz_taps(&mut g, prev)?;
