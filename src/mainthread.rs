@@ -38,11 +38,15 @@ const ID_HTML: &str = "root-html";
 const ID_RTLSDR: &str = "btn-rtlsdr";
 const ID_RTLSDR_FREQUENCY: &str = "input-rtlsdr-frequency";
 const ID_RTLSDR_OFFSET: &str = "input-rtlsdr-offset";
+const ID_RTLSDR_GAIN_AUTO: &str = "input-rtlsdr-gain-auto";
+const ID_RTLSDR_GAIN: &str = "input-rtlsdr-gain";
 const AUDIO_SAMPLE_RATE: f32 = 44_100.0;
 const AUDIO_START_LATENCY_SECONDS: f64 = 0.08;
 const AUDIO_TARGET_LATENCY_SECONDS: f64 = 0.10;
 const AUDIO_MAX_LATENCY_SECONDS: f64 = 1.0;
 const AUDIO_MAX_PLAYBACK_RATE: f32 = 1.02;
+const RTLSDR_MIN_GAIN_TENTHS_DB: i32 = -100;
+const RTLSDR_MAX_GAIN_TENTHS_DB: i32 = 500;
 
 struct AudioPlayback {
     context: AudioContext,
@@ -561,12 +565,61 @@ fn rtlsdr_encode_sample(sample: f32) -> u8 {
     ((sample / 0.008) + 127.0).round().clamp(0.0, 255.0) as u8
 }
 
+/// Convert the RTL-SDR gain controls into the device gain mode.
+fn rtlsdr_gain_mode() -> Result<rtlsdr_pure::GainMode, JsValue> {
+    if get_element(ID_RTLSDR_GAIN_AUTO)?
+        .dyn_into::<HtmlInputElement>()?
+        .checked()
+    {
+        return Ok(rtlsdr_pure::GainMode::Auto);
+    }
+
+    let gain_db: f64 = get_element(ID_RTLSDR_GAIN)?
+        .dyn_into::<HtmlInputElement>()?
+        .value()
+        .parse()
+        .map_err(|e| JsValue::from_str(&format!("parsing RTL-SDR tuner gain: {e}")))?;
+    if !gain_db.is_finite() {
+        return Err(JsValue::from_str("RTL-SDR tuner gain must be finite"));
+    }
+
+    let gain_tenths = (gain_db * 10.0).round();
+    if (gain_tenths - gain_db * 10.0).abs() > 1.0e-6 {
+        return Err(JsValue::from_str(
+            "RTL-SDR tuner gain must be in 0.1 dB steps",
+        ));
+    }
+    let gain_tenths = gain_tenths as i32;
+    if !(RTLSDR_MIN_GAIN_TENTHS_DB..=RTLSDR_MAX_GAIN_TENTHS_DB).contains(&gain_tenths) {
+        return Err(JsValue::from_str(&format!(
+            "RTL-SDR tuner gain must be between {:.1} and {:.1} dB",
+            RTLSDR_MIN_GAIN_TENTHS_DB as f32 / 10.0,
+            RTLSDR_MAX_GAIN_TENTHS_DB as f32 / 10.0
+        )));
+    }
+
+    Ok(rtlsdr_pure::GainMode::ManualTenthsDb(gain_tenths))
+}
+
+/// Enable RTL-SDR gain controls, leaving manual gain disabled while Auto is on.
+fn set_rtlsdr_gain_controls_enabled(enabled: bool) -> Result<(), JsValue> {
+    let auto = get_element(ID_RTLSDR_GAIN_AUTO)?.dyn_into::<HtmlInputElement>()?;
+    auto.set_disabled(!enabled);
+    update_rtlsdr_gain_control_state()
+}
+
+/// Mirror Auto gain state into the manual gain input's disabled state.
+fn update_rtlsdr_gain_control_state() -> Result<(), JsValue> {
+    let auto = get_element(ID_RTLSDR_GAIN_AUTO)?.dyn_into::<HtmlInputElement>()?;
+    let gain = get_element(ID_RTLSDR_GAIN)?.dyn_into::<HtmlInputElement>()?;
+    gain.set_disabled(auto.disabled() || auto.checked());
+    Ok(())
+}
+
 #[allow(clippy::too_many_lines)]
 async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> {
-    select_input_source(InputSource::RtlSdr)?;
-    disable_input_selectors()?;
-
     let sample_rate = 250_000u32;
+    let gain_mode = rtlsdr_gain_mode()?;
 
     let freq: i32 = get_element(ID_RTLSDR_FREQUENCY)?
         .dyn_into::<web_sys::HtmlInputElement>()?
@@ -589,6 +642,9 @@ async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> 
         )));
     }
 
+    select_input_source(InputSource::RtlSdr)?;
+    disable_input_selectors()?;
+
     info!(
         "RTLSDR manufacturer: {}",
         sdr.manufacturer().unwrap_or("<unknown>")
@@ -599,7 +655,8 @@ async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> 
     info!("sample rate: {actual_rate} Hz");
 
     if sdr.tuner_kind().is_supported() {
-        sdr.set_tuner_gain(rtlsdr_pure::GainMode::Auto).await?;
+        sdr.set_tuner_gain(gain_mode).await?;
+        info!("RTLSDR tuner gain: {gain_mode:?}");
         sdr.set_center_frequency(freq).await?;
         info!("center frequency: {freq} Hz");
     } else {
@@ -790,6 +847,17 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
         handler.forget();
     }
 
+    // Set up RTL-SDR gain controls.
+    {
+        let input = get_element(ID_RTLSDR_GAIN_AUTO)?.dyn_into::<HtmlInputElement>()?;
+        let handler = Closure::<dyn FnMut(Event) -> Result<(), JsValue>>::new(move |_event| {
+            update_rtlsdr_gain_control_state()?;
+            Ok(())
+        });
+        input.add_event_listener_with_callback("change", handler.as_ref().unchecked_ref())?;
+        handler.forget();
+    }
+
     // Set up Start button.
     {
         let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
@@ -819,6 +887,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
                 get_element(ID_RTLSDR_OFFSET)?
                     .dyn_into::<HtmlInputElement>()?
                     .set_disabled(false);
+                set_rtlsdr_gain_controls_enabled(true)?;
                 get_element(ID_RTLSDR)?
                     .dyn_into::<web_sys::HtmlButtonElement>()?
                     .set_disabled(false);
@@ -1153,6 +1222,7 @@ fn disable_input_selectors() -> Result<(), JsValue> {
     get_element(ID_RTLSDR_OFFSET)?
         .dyn_into::<HtmlInputElement>()?
         .set_disabled(true);
+    set_rtlsdr_gain_controls_enabled(false)?;
     get_element(ID_RTLSDR)?
         .dyn_into::<web_sys::HtmlButtonElement>()?
         .set_disabled(true);

@@ -115,6 +115,13 @@
             <label for="input-rtlsdr-offset">Tune offset (Hz)</label>
             <input id="input-rtlsdr-offset" type="number" min="0" step="1"
                     value="0" inputmode="numeric" disabled>
+            <label class="checkbox-field" for="input-rtlsdr-gain-auto">
+              <input id="input-rtlsdr-gain-auto" type="checkbox" checked disabled>
+              <span>Automatic tuner gain</span>
+            </label>
+            <label for="input-rtlsdr-gain">Manual tuner gain (dB)</label>
+            <input id="input-rtlsdr-gain" type="number" min="-10" max="50" step="0.1"
+                    value="0.0" inputmode="decimal" disabled>
             <button id="btn-rtlsdr" type="button" disabled>Connect RTLSDR</button>
           </div>
         </div>
