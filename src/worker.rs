@@ -27,7 +27,7 @@ use crate::{MainToWorker, WorkerToMain, WorkerToMainRef};
 const SOURCE_CHANNEL_SIZE: usize = 10;
 const IF_SAMPLE_RATE: usize = 50_000;
 const VIZ_SAMPLE_RATE: usize = 1_000;
-const SPECTRUM_SIZE: usize = 1024;
+const SPECTRUM_SIZE: usize = 256;
 
 /// Channels used to pass source data into a running graph.
 struct GraphComms {
