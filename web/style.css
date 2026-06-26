@@ -125,6 +125,12 @@ input[type="checkbox"] {
   accent-color: var(--accent);
 }
 
+input[type="range"] {
+  padding-right: 0;
+  padding-left: 0;
+  accent-color: var(--accent);
+}
+
 label {
   display: block;
   margin-bottom: 0.35rem;

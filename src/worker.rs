@@ -25,6 +25,7 @@ use crate::{MainToWorker, WorkerToMain, WorkerToMainRef};
 
 // TODO: magic values.
 const SOURCE_CHANNEL_SIZE: usize = 10;
+const AUDIO_SAMPLE_RATE: usize = 44_100;
 const IF_SAMPLE_RATE: usize = 50_000;
 const VIZ_SAMPLE_RATE: usize = 1_000;
 const SPECTRUM_SIZE: usize = 256;
@@ -337,10 +338,11 @@ async fn radio_1200(samp_rate: u64, rtlsdr: bool) -> rustradio::Result<String> {
     ];
     let prev = add_spectrum_tap(&mut g, prev);
     let prev = add_viz_taps(&mut g, prev)?;
+    let prev = blockchain![g, prev, QuadratureDemod::new(prev, 1.0)];
+    let prev = add_audio_tap(&mut g, prev)?;
     let prev = blockchain![
         g,
         prev,
-        QuadratureDemod::new(prev, 1.0),
         Hilbert::new(prev, 65, &rustradio::window::WindowType::Hamming),
         QuadratureDemod::new(prev, 1.0),
         FftFilterFloat::new(
@@ -448,6 +450,28 @@ fn add_spectrum_tap(
     g.add(Box::new(sink));
 
     src
+}
+
+/// Tee off demodulated audio after the first FM demodulator.
+fn add_audio_tap(
+    g: &mut crate::wasm_graph::WasmGraph,
+    src: ReadStream<rustradio::Float>,
+) -> rustradio::Result<ReadStream<rustradio::Float>> {
+    let (tee, src, audio) = Tee::new(src);
+    g.add(Box::new(tee));
+
+    let audio = blockchain![
+        g,
+        audio,
+        RationalResampler::builder()
+            .deci(IF_SAMPLE_RATE)
+            .interp(AUDIO_SAMPLE_RATE)
+            .build(audio)?
+    ];
+    let sink = crate::float_sink::FloatSink::new(audio, "audio_demod".into());
+    g.add(Box::new(sink));
+
+    Ok(src)
 }
 
 /// Tee off one downsampled complex stream for the visualization sinks.

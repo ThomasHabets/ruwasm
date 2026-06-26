@@ -73,6 +73,10 @@
             <input id="input-rtlsdr-format" type="checkbox">
             <span>RTL-SDR unsigned 8-bit I/Q input</span>
           </label>
+          <div class="field-group">
+            <label for="input-audio-volume">Audio volume</label>
+            <input id="input-audio-volume" type="range" min="0" max="1" step="0.01" value="0.00">
+          </div>
           <button id="btn-start" class="primary-action" type="button" disabled>Start RustRadio graph</button>
         </div>
       </section>
