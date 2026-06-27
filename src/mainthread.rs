@@ -837,8 +837,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
             let rtlsdr = get_element(ID_RTLSDR_FORMAT)?
                 .dyn_into::<web_sys::HtmlInputElement>()?
                 .checked();
-            // TODO: hard coded here.
-            crate::time_sink::set_sample_rate(samp_rate as f64);
+            crate::time_sink::set_sample_rate(crate::worker::VIZ_SAMPLE_RATE as f64);
             ensure_audio_playback()?;
             reset_audio_schedule();
             post_message(MainToWorker::Start(crate::Ax25Start {

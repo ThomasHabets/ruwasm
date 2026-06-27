@@ -28,7 +28,7 @@ use crate::{MainToWorker, WorkerToMain, WorkerToMainRef};
 const SOURCE_CHANNEL_SIZE: usize = 10;
 const AUDIO_SAMPLE_RATE: usize = 44_100;
 const IF_SAMPLE_RATE: usize = 50_000;
-const VIZ_SAMPLE_RATE: usize = 1_000;
+pub(crate) const VIZ_SAMPLE_RATE: usize = 1_000;
 const SPECTRUM_SIZE: usize = 256;
 
 /// Channels used to pass source data into a running graph.
@@ -507,9 +507,6 @@ fn add_viz_taps(
     g: &mut crate::wasm_graph::WasmGraph,
     src: ReadStream<rustradio::Complex>,
 ) -> rustradio::Result<ReadStream<rustradio::Complex>> {
-    // TODO: if you change this, change the time
-    // sink value in mainthread.rs too.
-    // and also in time_sink for max number of samples.
     let (input_tee, src, prev) = Tee::new(src);
     g.add(Box::new(input_tee));
 
