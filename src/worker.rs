@@ -324,38 +324,64 @@ async fn radio_1200(samp_rate: u64, offset: Float, rtlsdr: bool) -> rustradio::R
         blockchain![g, prev, Parse::new(prev)]
     };
 
+    let filter1 = rustradio::fir::low_pass_complex(
+        samp_rate,
+        10_000.0,
+        15_000.0,
+        &rustradio::window::WindowType::Hamming,
+    );
+    info!("Taps on first filter: {}", filter1.len());
+
+    // Filter and downsample raw signal.
+    let prev = {
+        let if_sample_rate = IF_SAMPLE_RATE as Float;
+        let deci = (samp_rate / if_sample_rate) as usize;
+        let if1_samp_rate = (samp_rate as usize) / deci;
+
+        let mut prev = blockchain![
+            g,
+            prev,
+            FirFilter::builder(filter1)
+                .deci(deci)
+                .translate(samp_rate, offset)
+                .build(prev),
+        ];
+
+        // If off by more than 2%, add a rational resampler.
+        let percent = ((if1_samp_rate as f32) - if_sample_rate).abs() / if_sample_rate;
+        info!("FIR decimation output off by {}%", percent * 100.0);
+        if percent > 0.02 {
+            info!("Adding a rational resampler from {if1_samp_rate} to {IF_SAMPLE_RATE}");
+            prev = blockchain![
+                g,
+                prev,
+                RationalResampler::builder()
+                    .deci(if1_samp_rate)
+                    .interp(IF_SAMPLE_RATE)
+                    .build(prev)?,
+            ];
+        }
+        prev
+    };
+
     // Set up rest of decoder graph.
-    let prev = blockchain![
-        g,
-        prev,
-        FirFilter::builder(rustradio::fir::low_pass_complex(
-            samp_rate,
-            10_000.0,
-            15_000.0,
-            &rustradio::window::WindowType::Hamming
-        ))
-        .deci(5)
-        .translate(samp_rate, offset)
-        .build(prev),
-    ];
     let prev = add_spectrum_tap(&mut g, prev);
     let prev = add_viz_taps(&mut g, prev)?;
     let prev = blockchain![g, prev, QuadratureDemod::new(prev, 1.0)];
     let prev = add_audio_tap(&mut g, prev)?;
+    let audio_filter = rustradio::fir::low_pass(
+        if_rate,
+        1100.0,
+        3900.0,
+        &rustradio::window::WindowType::Hamming,
+    );
+    info!("Audio filter taps: {}", audio_filter.len());
     let prev = blockchain![
         g,
         prev,
         Hilbert::new(prev, 65, &rustradio::window::WindowType::Hamming),
         QuadratureDemod::new(prev, 1.0),
-        FftFilterFloat::new(
-            prev,
-            &rustradio::fir::low_pass(
-                if_rate,
-                1100.0,
-                100.0,
-                &rustradio::window::WindowType::Hamming
-            )
-        ),
+        FirFilter::new(prev, &audio_filter),
         add_const(prev, -center_freq * 2.0 * std::f32::consts::PI / if_rate),
         SymbolSync::new(
             prev,
