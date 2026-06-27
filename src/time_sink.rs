@@ -316,39 +316,188 @@ fn draw_graph() -> Result<(), JsValue> {
         let x_range = (x_max - x_min).max(1e-9);
         let y_range = f64::from(y_max - y_min);
         let colors = ["#2b8cbe", "#31a354", "#756bb1", "#e6550d"];
+        let samples_per_bucket = (x_range * state.sample_rate / plot_width.max(1.0))
+            .ceil()
+            .max(1.0) as u64;
 
         for (idx, series) in state.series.iter().enumerate() {
-            if series.samples.is_empty() {
-                continue;
-            }
-            let len = series.samples.len();
-            let mut step = (len as f64 / plot_width.max(1.0)).ceil() as usize;
-            if step < 1 {
-                step = 1;
-            }
-            ctx.set_stroke_style_str(colors[idx % colors.len()]);
-            ctx.set_line_width(1.0);
-            ctx.begin_path();
-            let mut started = false;
-            for (i, sample) in series.samples.iter().enumerate().step_by(step) {
-                let sample_idx = series.start_index + i as u64;
-                let t = sample_idx as f64 / state.sample_rate;
-                let x = plot_left + ((t - x_min) / x_range) * plot_width;
-                let y = plot_top + plot_height
-                    - ((f64::from(*sample) - f64::from(y_min)) / y_range) * plot_height;
-                if started {
-                    ctx.line_to(x, y);
-                } else {
-                    ctx.move_to(x, y);
-                    started = true;
-                }
-            }
-            ctx.stroke();
+            draw_series(
+                &ctx,
+                series,
+                colors[idx % colors.len()],
+                plot_left,
+                plot_top,
+                plot_width,
+                plot_height,
+                x_min,
+                x_range,
+                f64::from(y_min),
+                y_range,
+                state.sample_rate,
+                samples_per_bucket,
+            );
         }
         Ok(())
     })?;
 
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_series(
+    ctx: &CanvasRenderingContext2d,
+    series: &GraphSeries,
+    color: &str,
+    plot_left: f64,
+    plot_top: f64,
+    plot_width: f64,
+    plot_height: f64,
+    x_min: f64,
+    x_range: f64,
+    y_min: f64,
+    y_range: f64,
+    sample_rate: f64,
+    samples_per_bucket: u64,
+) {
+    if series.samples.is_empty() {
+        return;
+    }
+
+    ctx.set_stroke_style_str(color);
+    ctx.set_line_width(1.0);
+
+    if samples_per_bucket <= 1 {
+        ctx.begin_path();
+        let mut started = false;
+        for (i, sample) in series.samples.iter().enumerate() {
+            let sample_idx = series.start_index + i as u64;
+            let x = graph_x(
+                sample_idx,
+                sample_rate,
+                plot_left,
+                plot_width,
+                x_min,
+                x_range,
+            );
+            let y = graph_y(f64::from(*sample), plot_top, plot_height, y_min, y_range);
+            if started {
+                ctx.line_to(x, y);
+            } else {
+                ctx.move_to(x, y);
+                started = true;
+            }
+        }
+        ctx.stroke();
+        return;
+    }
+
+    let mut points = Vec::new();
+    let mut bucket: Option<u64> = None;
+    let mut first_idx = 0;
+    let mut last_idx = 0;
+    let mut bucket_min = f32::INFINITY;
+    let mut bucket_max = f32::NEG_INFINITY;
+
+    for (i, sample) in series.samples.iter().enumerate() {
+        let sample_idx = series.start_index + i as u64;
+        let sample_bucket = sample_idx / samples_per_bucket;
+        if bucket.is_some_and(|v| v != sample_bucket) {
+            push_bucket_point(
+                &mut points,
+                first_idx,
+                last_idx,
+                bucket_min,
+                bucket_max,
+                sample_rate,
+                plot_left,
+                plot_width,
+                x_min,
+                x_range,
+                plot_top,
+                plot_height,
+                y_min,
+                y_range,
+            );
+            bucket_min = f32::INFINITY;
+            bucket_max = f32::NEG_INFINITY;
+            first_idx = sample_idx;
+        } else if bucket.is_none() {
+            first_idx = sample_idx;
+        }
+        bucket = Some(sample_bucket);
+        last_idx = sample_idx;
+        bucket_min = bucket_min.min(*sample);
+        bucket_max = bucket_max.max(*sample);
+    }
+
+    if bucket.is_some() {
+        push_bucket_point(
+            &mut points,
+            first_idx,
+            last_idx,
+            bucket_min,
+            bucket_max,
+            sample_rate,
+            plot_left,
+            plot_width,
+            x_min,
+            x_range,
+            plot_top,
+            plot_height,
+            y_min,
+            y_range,
+        );
+    }
+
+    ctx.begin_path();
+    for (idx, &(x, y)) in points.iter().enumerate() {
+        if idx == 0 {
+            ctx.move_to(x, y);
+        } else {
+            ctx.line_to(x, y);
+        }
+    }
+    ctx.stroke();
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_bucket_point(
+    points: &mut Vec<(f64, f64)>,
+    first_idx: u64,
+    last_idx: u64,
+    bucket_min: f32,
+    bucket_max: f32,
+    sample_rate: f64,
+    plot_left: f64,
+    plot_width: f64,
+    x_min: f64,
+    x_range: f64,
+    plot_top: f64,
+    plot_height: f64,
+    y_min: f64,
+    y_range: f64,
+) {
+    let center_idx = (first_idx + last_idx) as f64 / 2.0;
+    let x = plot_left + ((center_idx / sample_rate - x_min) / x_range) * plot_width;
+    let y_min_px = graph_y(f64::from(bucket_min), plot_top, plot_height, y_min, y_range);
+    let y_max_px = graph_y(f64::from(bucket_max), plot_top, plot_height, y_min, y_range);
+    points.push((x, f64::midpoint(y_min_px, y_max_px)));
+}
+
+fn graph_x(
+    sample_idx: u64,
+    sample_rate: f64,
+    plot_left: f64,
+    plot_width: f64,
+    x_min: f64,
+    x_range: f64,
+) -> f64 {
+    let t = sample_idx as f64 / sample_rate;
+    plot_left + ((t - x_min) / x_range) * plot_width
+}
+
+fn graph_y(sample: f64, plot_top: f64, plot_height: f64, y_min: f64, y_range: f64) -> f64 {
+    plot_top + plot_height - ((sample - y_min) / y_range) * plot_height
 }
 
 #[allow(clippy::too_many_arguments)]
