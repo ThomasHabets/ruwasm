@@ -676,9 +676,13 @@ async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> 
     }
 
     // Stream data.
-    // let read_len = 65536usize; // at 250ksps this is a 262ms. Or is it double
-    // that?
-    let read_len = 16384usize; // at 250ksps this is a 65ms. 16384/250000
+    //
+    // Two bytes per sample, so `bytes / sample_rate / 2` seconds.
+    //
+    // At 250ksps:
+    // * 65536: 131ms
+    // * 16384: 33ms
+    let read_len = 16384usize;
 
     info!("Running the rtlsdr loop");
     let mut deadline = js_performance_now() + 1000.0f64; // One second. Basically infinite time.
