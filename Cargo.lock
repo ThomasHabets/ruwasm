@@ -951,7 +951,7 @@ dependencies = [
  "num-complex",
  "rayon",
  "rustfft",
- "rustradio_macros 0.17.2",
+ "rustradio_macros",
  "serde",
  "serde_json",
  "sha2",
@@ -978,36 +978,13 @@ dependencies = [
 
 [[package]]
 name = "rustradio_macros"
-version = "0.16.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c92f4b332d99a2b3cd9c49a891860db94185989f8a3293e7067aea08ef3e896"
-dependencies = [
- "proc-macro2",
- "quote",
- "rustradio_macros_code 0.16.9",
- "syn",
-]
-
-[[package]]
-name = "rustradio_macros"
 version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab671656e6e544708ce9603bef47499ad9f5556e1f44f6df9467c7090cc865ed"
 dependencies = [
  "proc-macro2",
  "quote",
- "rustradio_macros_code 0.17.2",
- "syn",
-]
-
-[[package]]
-name = "rustradio_macros_code"
-version = "0.16.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba9ca9b0c16738f25923f368945ddb5f24635c7b54f25d722c609dcdb5c22148"
-dependencies = [
- "proc-macro2",
- "quote",
+ "rustradio_macros_code",
  "syn",
 ]
 
@@ -1047,7 +1024,7 @@ dependencies = [
  "rtlsdr-pure",
  "rustradio",
  "rustradio-ui",
- "rustradio_macros 0.16.9",
+ "rustradio_macros",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
