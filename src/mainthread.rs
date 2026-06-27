@@ -631,7 +631,6 @@ async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> 
         .value()
         .parse()
         .map_err(|e| JsValue::from_str(&format!("parsing sample rate: {e}")))?;
-    info!("KEFFO offset {offset}");
     let freq = u32::try_from(freq - offset).map_err(|_e| {
         JsValue::from_str(&format!("frequency {freq} can't subtract offset {offset}"))
     })?;
@@ -835,7 +834,6 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
                 .value()
                 .parse()
                 .map_err(|e| JsValue::from_str(&format!("parsing offset rate: {e}")))?;
-            info!("HABETS offset {offset}");
             let rtlsdr = get_element(ID_RTLSDR_FORMAT)?
                 .dyn_into::<web_sys::HtmlInputElement>()?
                 .checked();
