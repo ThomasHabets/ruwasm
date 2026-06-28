@@ -36,6 +36,7 @@ const ID_RTLSDR_FREQUENCY: &str = "input-rtlsdr-frequency";
 const ID_OFFSET: &str = "input-offset";
 const ID_RTLSDR_GAIN_AUTO: &str = "input-rtlsdr-gain-auto";
 const ID_RTLSDR_GAIN: &str = "input-rtlsdr-gain";
+pub(crate) const ID_LOG_OUTPUT: &str = "log-output";
 const RTLSDR_MIN_GAIN_TENTHS_DB: i32 = -100;
 const RTLSDR_MAX_GAIN_TENTHS_DB: i32 = 500;
 
@@ -573,10 +574,13 @@ pub(crate) fn worker() -> Worker {
             let mut bootstrapped = false;
 
             // Set message handler.
+            // Cloning a worker handle is cheap.
+            let handler_worker = worker.clone();
             let onmessage = Closure::<dyn FnMut(MessageEvent) -> Result<(), JsValue>>::new(
                 move |e: MessageEvent| {
                     if !bootstrapped {
-                        bootstrapped = crate::start_worker::msg(&e);
+                        // Cloning a worker handle is cheap.
+                        bootstrapped = rustradio_ui::start_worker::msg(handler_worker.clone(), &e);
 
                         if bootstrapped {
                             info!("Bootstrap done");
@@ -602,7 +606,10 @@ pub(crate) fn worker() -> Worker {
                     spawn_local(async move {
                         match e.data().try_into() {
                             Ok(msg) => {
-                                warn!("Received posted {msg:?}");
+                                match &msg {
+                                    WorkerToMain::LogLine { .. } => {}
+                                    _other => warn!("Main thread received posted {msg:?}"),
+                                }
                                 if let Err(e) = worker_msg(msg).await {
                                     error!("Main: Inner receiver thing: {e:?}");
                                 }

@@ -164,7 +164,10 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
         spawn_local(async move {
             match event.data().try_into() {
                 Ok(msg) => {
-                    warn!("Received posted {msg:?}");
+                    match &msg {
+                        MainToWorker::BootstrapMpsc(_) => {}
+                        _other => warn!("Worker received posted {msg:?}"),
+                    }
                     if let Err(e) = worker_msg(msg).await {
                         info!("Worker message handler failed: {e:?}");
                     }

@@ -17,10 +17,8 @@ use wasm_bindgen::prelude::*;
 pub use wasm_bindgen_rayon::init_thread_pool;
 
 mod constellation_sink;
-mod domlogger;
 mod mainthread;
 mod spectrum_sink;
-mod start_worker;
 mod time_sink;
 mod wasm_graph;
 mod wasm_source;
@@ -100,7 +98,10 @@ pub async fn start() -> Result<(), JsValue> {
         );
         worker::setup().await
     } else {
-        domlogger::init_logging().expect("failed to init logging");
+        rustradio_ui::dom_logger::init_logging::<Ax25WorkerToMain>(
+            crate::mainthread::ID_LOG_OUTPUT,
+        )
+        .expect("failed to init logging");
         info!("Main: Starting at time {}", js_performance_now());
         mainthread::setup().await
     }
@@ -150,12 +151,3 @@ pub fn add(a: i32, b: i32) -> String {
     info!("Hello world, adding {a} and {b}");
     format!("Add results: {}", a + b)
 }
-
-/*
-use web_sys::js_sys::Uint8Array;
-pub(crate) fn uint8array_to_vec(arr: &Uint8Array) -> Vec<u8> {
-    let mut buf = vec![0; arr.length() as usize];
-    arr.copy_to(&mut buf);
-    buf
-}
-*/
