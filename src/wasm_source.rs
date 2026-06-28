@@ -2,10 +2,9 @@
 //! websocket or a file.
 use rustradio::Result;
 use rustradio::block::{Block, BlockRet};
-use rustradio::data_stream::DataStreamId;
 use rustradio::stream::{ReadStream, WriteStream, new_stream};
 
-use crate::receiver_source;
+use crate::RECEIVER_SOURCE_ID;
 
 // TODO: magic value.
 const PRODUCE_CHANNEL_SIZE: usize = 10;
@@ -17,15 +16,13 @@ pub enum Msg {
     Eof,
     /// Append bytes received for this source.
     Extend(Vec<u8>),
-    /// Clear the outstanding request flag and try requesting again.
-    RetryRequest,
 }
 
 /// Block for getting data from the UI thread, which in turn gets it from
 /// websocket (data stream) or a file.
 #[derive(rustradio_macros::Block)]
 pub struct WasmSource {
-    receiver: DataStreamId,
+    receiver: String,
     buf: Vec<u8>,
     eof: bool,
     pos: u64,
@@ -41,7 +38,7 @@ impl WasmSource {
         let (dst, src) = new_stream();
         (
             Self {
-                receiver: receiver_source(),
+                receiver: RECEIVER_SOURCE_ID.to_string(),
                 buf: vec![],
                 dst,
                 eof: false,
@@ -81,9 +78,6 @@ impl WasmSource {
                 Ok(Msg::Extend(v)) => {
                     self.pos += v.len() as u64;
                     self.extend(&v);
-                    self.outstanding_req = false;
-                }
-                Ok(Msg::RetryRequest) => {
                     self.outstanding_req = false;
                 }
             }

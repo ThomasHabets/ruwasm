@@ -1,11 +1,11 @@
 //! A sink block that posts PDUs of float from worker to main UI thread.
+use rustradio::Float;
 use rustradio::block::{Block, BlockRet};
 use rustradio::stream::{NCReadStream, Tag, TagValue};
-use rustradio::{Error, Float};
-use rustradio_ui::SharedVecPtr;
+use rustradio_ui::TaggedVec;
 
 use crate::WorkerToMain;
-use crate::worker::post_message;
+use crate::worker::send_message_from_sync;
 
 const DEBUG_KEEP_1_IN_N: usize = 1;
 
@@ -38,11 +38,13 @@ impl Block for FloatPduSink {
                     "rustradio::sample_rate",
                     TagValue::Float(self.sample_rate),
                 ));
-                post_message(WorkerToMain::SharedFloat(
+                send_message_from_sync(WorkerToMain::Floats(
                     self.name.clone(),
-                    vec![SharedVecPtr::new(samples, tags)],
-                ))
-                .map_err(|e| Error::msg(format!("post float PDU stream: {e:?}")))?;
+                    vec![TaggedVec {
+                        data: samples,
+                        tags,
+                    }],
+                ));
                 self.skip = 0;
             }
         }

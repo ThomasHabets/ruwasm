@@ -363,7 +363,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13b66accf52311f30a0db42147dadea9850cb48cd070028831ae5f5d4b856ab"
 dependencies = [
  "concurrent-queue",
- "parking",
  "pin-project-lite",
 ]
 
@@ -744,12 +743,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
-name = "parking"
-version = "2.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba"
-
-[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -964,10 +957,11 @@ dependencies = [
 
 [[package]]
 name = "rustradio-ui"
-version = "0.1.9"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80a25ed8bab26b54e79f6774fecf8174b89cecc43387d1ead93664e16b897b15"
+checksum = "9e8e13784fc0dfeca6a313001ba21bbab8a3cc2265c0a065a74cafd0d3692b18"
 dependencies = [
+ "async-channel",
  "log",
  "num-complex",
  "rustradio",

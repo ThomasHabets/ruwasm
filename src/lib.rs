@@ -8,7 +8,6 @@
 //
 use log::info;
 use rustradio::Float;
-use rustradio::data_stream::DataStreamId;
 use rustradio_ui::ApplicationSpecific;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -19,7 +18,6 @@ pub use wasm_bindgen_rayon::init_thread_pool;
 
 mod complex_sink;
 mod constellation_sink;
-mod data_stream;
 mod domlogger;
 mod float_pdu_sink;
 mod float_sink;
@@ -33,14 +31,8 @@ mod worker;
 
 type MainToWorker = rustradio_ui::MainToWorker<Ax25MainToWorker>;
 type WorkerToMain = rustradio_ui::WorkerToMain<Ax25WorkerToMain>;
-type WorkerToMainRef<'a> = rustradio_ui::WorkerToMainRef<'a, Ax25WorkerToMainRef<'a>>;
 
 pub(crate) const RECEIVER_SOURCE_ID: &str = "rtl-sdr";
-
-/// Return the DATA_STREAM id used by the single input source receiver.
-pub(crate) fn receiver_source() -> DataStreamId {
-    DataStreamId::new(RECEIVER_SOURCE_ID)
-}
 
 #[wasm_bindgen]
 extern "C" {
@@ -70,12 +62,6 @@ struct Ax25End {
     s: String,
 }
 
-/// Application specific end result.
-#[derive(Debug, Serialize, Deserialize)]
-struct Ax25EndRef<'a> {
-    s: &'a str,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 struct Ax25WorkerToMain {}
 
@@ -94,18 +80,6 @@ impl ApplicationSpecific for Ax25MainToWorker {
     type Start = Ax25Start;
     type Ready = Ax25Ready;
     type End = Ax25End;
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Ax25WorkerToMainRef<'a> {
-    _dummy: std::marker::PhantomData<&'a u8>,
-}
-
-impl<'a> ApplicationSpecific for Ax25WorkerToMainRef<'a> {
-    type App = Ax25Messages;
-    type Start = Ax25Start;
-    type Ready = Ax25Ready;
-    type End = Ax25EndRef<'a>;
 }
 
 /// Application specific ready data.

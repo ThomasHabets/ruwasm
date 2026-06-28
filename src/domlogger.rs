@@ -47,7 +47,7 @@ impl Log for DomConsoleLogger {
         // TODO: can we cache this JS object? Or what happens if it's GC'd?
 
         let Some(document) = window().and_then(|w| w.document()) else {
-            if let Err(e) = crate::worker::post_message(WorkerToMain::LogLine {
+            if let Err(e) = crate::worker::post_message(&WorkerToMain::LogLine {
                 level: record.level(),
                 line: record.args().to_string(),
             }) {

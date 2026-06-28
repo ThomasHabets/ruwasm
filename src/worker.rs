@@ -7,22 +7,26 @@ use rustradio::Float;
 use rustradio::blockchain;
 #[allow(clippy::wildcard_imports)]
 use rustradio::blocks::*;
-use rustradio::data_stream::DataStreamId;
 use rustradio::graph::GraphRunner;
 use rustradio::stream::ReadStream;
+use rustradio_ui::{BootstrapMpsc, TaggedVec};
 
-use log::{error, info, trace, warn};
+use async_channel::Sender;
+use log::{error, info, warn};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
 use crate::Ax25Messages;
-use crate::data_stream::{DataStream, Event as DataStreamEvent, RequestState};
+use crate::RECEIVER_SOURCE_ID;
 use crate::js_performance_now;
-use crate::receiver_source;
 use crate::wasm_source;
-use crate::{MainToWorker, WorkerToMain, WorkerToMainRef};
+use crate::{MainToWorker, WorkerToMain};
+
+thread_local! {
+    static MAIN_UI_TX: RefCell<Option<Sender<WorkerToMain>>> = const { RefCell::new(None)} ;
+}
 
 // TODO: magic values.
 const SOURCE_CHANNEL_SIZE: usize = 10;
@@ -33,91 +37,41 @@ const SPECTRUM_SIZE: usize = 256;
 
 /// Channels used to pass source data into a running graph.
 struct GraphComms {
-    src: HashMap<DataStreamId, async_channel::Sender<crate::wasm_source::Msg>>,
+    src: HashMap<String, async_channel::Sender<crate::wasm_source::Msg>>,
     graph: async_channel::Sender<()>,
 }
 
 thread_local! {
     static GRAPH_COMMS: OnceCell<Rc<futures_intrusive::sync::LocalMutex<GraphComms>>> = const { OnceCell::new() };
-    static DATA_STREAM: RefCell<DataStream> = RefCell::new(DataStream::new());
 }
 
-#[allow(clippy::enum_glob_use)]
-fn forget_shared<T: rustradio_ui::ApplicationSpecific>(msg: rustradio_ui::WorkerToMain<T>) {
-    use rustradio_ui::WorkerToMain::*;
-    match msg {
-        // Ignore all the messages that don't have shared data.
-        Ready(_)
-        | ApplicationSpecific(_)
-        | Ping(_)
-        | Pong(_)
-        | DataStream(_)
-        | End(_)
-        | LogLine { .. }
-        | FloatStreams(_)
-        | ComplexStreams(_) => {}
-        SharedFloat(_, v) => {
-            for e in v {
-                e.forget();
-            }
-        }
-        SharedComplex(_, v) => {
-            for e in v {
-                e.forget();
-            }
-        }
-    }
-}
-
-#[allow(clippy::enum_glob_use)]
-fn drop_shared<T: rustradio_ui::ApplicationSpecific>(msg: rustradio_ui::WorkerToMain<T>) {
-    use rustradio_ui::WorkerToMain::*;
-    match msg {
-        // Ignore all the messages that don't have shared data.
-        Ready(_)
-        | ApplicationSpecific(_)
-        | Ping(_)
-        | Pong(_)
-        | DataStream(_)
-        | End(_)
-        | LogLine { .. }
-        | FloatStreams(_)
-        | ComplexStreams(_) => {}
-        SharedFloat(_, v) => {
-            for e in v {
-                let _ = e.into_vec();
-            }
-        }
-        SharedComplex(_, v) => {
-            for e in v {
-                let _ = e.into_vec();
-            }
-        }
-    }
-}
-
-/// Post a message to the main UI.
-pub(crate) fn post_message(msg: WorkerToMain) -> Result<(), JsValue> {
-    match post_message_ref(&msg) {
-        Ok(()) => {
-            forget_shared(msg);
-            Ok(())
-        }
-        Err(e) => {
-            drop_shared(msg);
-            Err(e)
-        }
-    }
-}
-
-pub(crate) fn post_message_ref<T: Serialize + ?Sized>(msg: &T) -> Result<(), JsValue> {
+pub(crate) fn post_message<T: Serialize + ?Sized>(msg: &T) -> Result<(), JsValue> {
     let msg = serde_wasm_bindgen::to_value(msg)?;
     let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
     scope.post_message(&msg)
 }
 
+pub(crate) async fn send_message(msg: WorkerToMain) -> Result<(), JsValue> {
+    if let Some(ch) = MAIN_UI_TX.with(|slot| slot.borrow_mut().clone()) {
+        ch.send(msg)
+            .await
+            .map_err(|_| JsValue::from_str("failed to send to worker"))
+    } else {
+        error!("Tried to send before worker channel set up. Falling back to posting");
+        post_message(&msg)
+    }
+}
+
+pub(crate) fn send_message_from_sync(msg: WorkerToMain) {
+    spawn_local(async move {
+        if let Err(e) = send_message(msg).await {
+            error!("Failed to send message: {e:?}");
+        }
+    });
+}
+
 /// Send one control or data message to the graph source for a receiver.
-async fn send_source_msg(id: DataStreamId, msg: wasm_source::Msg) -> Result<(), JsValue> {
+async fn send_source_msg(id: &str, msg: wasm_source::Msg) -> Result<(), JsValue> {
     let Some(comms) = GRAPH_COMMS.with(|cell| {
         let cell = cell.clone();
         cell.get().map(Clone::clone)
@@ -130,7 +84,7 @@ async fn send_source_msg(id: DataStreamId, msg: wasm_source::Msg) -> Result<(), 
         let comms = comms.lock().await;
         comms
             .src
-            .get(&id)
+            .get(id)
             .map(|src| (src.clone(), comms.graph.clone()))
     }) else {
         warn!("Worker: no receiver registered for {id}");
@@ -147,84 +101,43 @@ async fn send_source_msg(id: DataStreamId, msg: wasm_source::Msg) -> Result<(), 
     Ok(())
 }
 
-/// Request more bytes for a WasmSource through the DATA_STREAM protocol.
-pub(crate) fn request_receiver_data(
-    receiver: &DataStreamId,
-    _pos: u64,
-    size: u64,
-) -> rustradio::Result<()> {
-    let request_state = DATA_STREAM.with(|data_stream| {
-        data_stream
-            .borrow_mut()
-            .request_data(receiver, size as usize)
-    })?;
-
-    match request_state {
-        RequestState::Waiting => Ok(()),
-        RequestState::Issued(packet) => {
-            post_message(WorkerToMain::DataStream(packet))
-                .map_err(|e| rustradio::Error::msg(format!("{e:?}")))?;
-            Ok(())
-        }
-    }
-}
-
-/// Apply inbound DATA_STREAM bytes from main or WebSocket to graph sources.
-async fn handle_data_stream_bytes(data: &[u8]) -> Result<(), JsValue> {
-    if data.is_empty() {
-        let receivers = DATA_STREAM.with(|data_stream| data_stream.borrow_mut().disconnect());
-        let receivers = if receivers.is_empty() {
-            vec![receiver_source()]
-        } else {
-            receivers
-        };
-        for receiver in receivers {
-            send_source_msg(receiver, wasm_source::Msg::Eof).await?;
-        }
-        return Ok(());
-    }
-
-    // TODO: can we create borrowed events instead of copying them?
-    let events = DATA_STREAM
-        .with(|data_stream| data_stream.borrow_mut().handle_bytes(data))
-        .map_err(|e| JsValue::from_str(&format!("{e:?}")))?;
-
-    for event in events {
-        match event {
-            DataStreamEvent::PeerReady => {
-                let receivers = DATA_STREAM.with(|data_stream| data_stream.borrow().receivers());
-                for receiver in receivers {
-                    send_source_msg(receiver, wasm_source::Msg::RetryRequest).await?;
-                }
-            }
-            DataStreamEvent::Data { receiver, data } => {
-                send_source_msg(receiver, wasm_source::Msg::Extend(data)).await?;
-            }
-            DataStreamEvent::Eof { receiver } => {
-                send_source_msg(receiver, wasm_source::Msg::Eof).await?;
-            }
-        }
-    }
-
+/// Ask the main UI thread for another source chunk.
+pub(crate) fn request_receiver_data(receiver: &str, _pos: u64, size: u64) -> rustradio::Result<()> {
+    let size = usize::try_from(size)
+        .map_err(|_| rustradio::Error::msg("source request size does not fit usize"))?;
+    send_message_from_sync(WorkerToMain::RequestData(receiver.to_string(), size));
     Ok(())
 }
 
+/// Convert one shared-memory byte message into a graph-source update.
+fn source_msg_from_bytes(streams: Vec<TaggedVec<u8>>) -> wasm_source::Msg {
+    let mut streams = streams.into_iter();
+    let mut data = streams.next().map(|stream| stream.data).unwrap_or_default();
+    for stream in streams {
+        data.extend(stream.data);
+    }
+    if data.is_empty() {
+        wasm_source::Msg::Eof
+    } else {
+        wasm_source::Msg::Extend(data)
+    }
+}
+
 /// Handle message sent from Main thread to worker.
-async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
-    match event.data().try_into()? {
-        MainToWorker::SharedByte(name, streams) => {
-            assert_eq!(name, "rtl-sdr");
-            let streams: Vec<_> = streams
-                .into_iter()
-                .map(rustradio_ui::SharedVecPtr::into_vec)
-                .collect();
-            //handle_data_stream_bytes(&bytes).await?;
-            // TODO: avoid this copy.
-            send_source_msg(
-                name.clone().into(),
-                wasm_source::Msg::Extend(streams[0].data.clone()),
-            )
-            .await?;
+async fn worker_msg(msg: MainToWorker) -> Result<(), JsValue> {
+    match msg {
+        MainToWorker::BootstrapMpsc(b) => {
+            info!("Received main channel endpoints");
+            let BootstrapMpsc { tx, rx } = BootstrapMpsc::from_ptr(b);
+            //MAIN_UI_RX.with(|slot| *slot.borrow_mut() = Some(boot.rx));
+            MAIN_UI_TX.with(|slot| *slot.borrow_mut() = Some(tx));
+            spawn_local(async move {
+                while let Ok(msg) = rx.recv().await {
+                    if let Err(e) = worker_msg(msg).await {
+                        error!("Failed to process message {e:?}");
+                    }
+                }
+            });
         }
         MainToWorker::Start(crate::Ax25Start {
             samp_rate,
@@ -233,22 +146,24 @@ async fn worker_msg(event: MessageEvent) -> Result<(), JsValue> {
         }) => {
             info!("Got MainToWorker::Start sample rate {samp_rate} offset {offset}");
             // Run the decoder.
-            let o = radio_1200(samp_rate, offset, rtlsdr).await?;
+            let s = radio_1200(samp_rate, offset, rtlsdr).await?;
             // Using reference serialization here doesn't actually help, but it
             // does work.
-            post_message_ref(&WorkerToMainRef::End(crate::Ax25EndRef { s: &o }))?;
+            send_message(WorkerToMain::End(crate::Ax25End { s })).await?;
         }
-        MainToWorker::DataStream(data) => {
-            trace!("Worker: Got DATA_STREAM bytes len {}", data.len());
-            handle_data_stream_bytes(&data).await?;
+        MainToWorker::Bytes(name, streams) => {
+            send_source_msg(&name, source_msg_from_bytes(streams)).await?;
         }
         MainToWorker::Ping(t) => {
             info!("Worker: Got ping");
-            post_message(WorkerToMain::Pong(t))?;
+            post_message(&WorkerToMain::Pong(t))?;
         }
         MainToWorker::Pong(from) => {
             let to = js_performance_now();
             info!("Worker: Got Pong {from} -> {to}: {}", to - from);
+        }
+        other => {
+            info!("Got unknown {other:?}");
         }
     }
     Ok(())
@@ -267,8 +182,14 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
         // syncly somehow. Maybe by adding a hop through an mpsc. That or remove
         // a level of indirection. :-)
         spawn_local(async move {
-            if let Err(e) = worker_msg(event).await {
-                info!("Worker message handler failed: {e:?}");
+            match event.data().try_into() {
+                Ok(msg) => {
+                    warn!("Received posted {msg:?}");
+                    if let Err(e) = worker_msg(msg).await {
+                        info!("Worker message handler failed: {e:?}");
+                    }
+                }
+                Err(e) => error!("Failed to deserialize event {event:?}: {e:?}"),
             }
         });
     });
@@ -286,7 +207,7 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
     global.set_onmessageerror(Some(onmsgerr.as_ref().unchecked_ref()));
     onmsgerr.forget();
 
-    post_message(WorkerToMain::Ready(crate::Ax25Ready {}))?;
+    post_message(&WorkerToMain::Ready(crate::Ax25Ready {}))?;
     info!("Done setting up worker");
 
     Ok(())
@@ -406,10 +327,9 @@ async fn radio_1200(samp_rate: u64, offset: Float, rtlsdr: bool) -> rustradio::R
                     } else {
                         info!("Parsed: {packet:?}");
                     }
-                    post_message(WorkerToMain::ApplicationSpecific(Ax25Messages::Decoded(
-                        format!("Last decode: {packet:?}"),
-                    )))
-                    .unwrap();
+                    send_message_from_sync(WorkerToMain::ApplicationSpecific(
+                        Ax25Messages::Decoded(format!("Last decode: {packet:?}")),
+                    ));
                 }
                 Err(e) => {
                     info!("Packet did not decode: {e}");
@@ -420,18 +340,15 @@ async fn radio_1200(samp_rate: u64, offset: Float, rtlsdr: bool) -> rustradio::R
     ];
 
     let (tx, rx) = async_channel::bounded(SOURCE_CHANNEL_SIZE);
-    DATA_STREAM.with(|data_stream| {
-        data_stream
-            .borrow_mut()
-            .register_receiver(receiver_source());
-    });
     GRAPH_COMMS.with(|cell| {
         cell.get_or_init(move || {
             // Need `is_fair` to be set, because data packets need to come in
             // order.
             Rc::new(futures_intrusive::sync::LocalMutex::new(
                 GraphComms {
-                    src: [(receiver_source(), src_tx)].into_iter().collect(),
+                    src: [(RECEIVER_SOURCE_ID.to_string(), src_tx)]
+                        .into_iter()
+                        .collect(),
                     graph: tx,
                 },
                 true,
@@ -598,4 +515,38 @@ async fn radio_wrap_9600(iq: bool) -> rustradio::Result<String> {
         None => "nothing decoded".to_string(),
         Some(p) => format!("Decoded {p:?}").to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::source_msg_from_bytes;
+    use crate::wasm_source::Msg;
+    use rustradio_ui::TaggedVec;
+
+    #[test]
+    fn empty_byte_message_is_eof() {
+        let streams = vec![TaggedVec {
+            data: Vec::new(),
+            tags: Vec::new(),
+        }];
+        assert!(matches!(source_msg_from_bytes(streams), Msg::Eof));
+    }
+
+    #[test]
+    fn byte_streams_are_joined_in_order() {
+        let streams = vec![
+            TaggedVec {
+                data: vec![1, 2],
+                tags: Vec::new(),
+            },
+            TaggedVec {
+                data: vec![3, 4],
+                tags: Vec::new(),
+            },
+        ];
+        match source_msg_from_bytes(streams) {
+            Msg::Extend(data) => assert_eq!(data, [1, 2, 3, 4]),
+            Msg::Eof => panic!("expected source bytes"),
+        }
+    }
 }

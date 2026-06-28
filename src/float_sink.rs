@@ -1,10 +1,10 @@
 //! A sink block that posts the data stream from worker to main UI thread.
+use rustradio::Float;
 use rustradio::block::{Block, BlockRet};
 use rustradio::stream::ReadStream;
-use rustradio::{Error, Float};
-use rustradio_ui::SharedVecPtr;
+use rustradio_ui::TaggedVec;
 
-use crate::worker::post_message;
+use crate::worker::send_message_from_sync;
 
 //type WorkerToMain = rustradio_ui::WorkerToMain<rustradio_ui::AppEmpty>;
 use crate::WorkerToMain;
@@ -26,11 +26,13 @@ impl Block for FloatSink {
         let (input, tags) = self.src.read_buf()?;
         let ilen = input.len();
         if ilen > 0 {
-            post_message(WorkerToMain::SharedFloat(
+            send_message_from_sync(WorkerToMain::Floats(
                 self.name.clone(),
-                vec![SharedVecPtr::new(input.slice(), tags)],
-            ))
-            .map_err(|e| Error::msg(format!("post float streams: {e:?}")))?;
+                vec![TaggedVec {
+                    data: input.slice().to_vec(),
+                    tags,
+                }],
+            ));
             input.consume(ilen);
         }
         Ok(BlockRet::WaitForStream(&self.src, 1))

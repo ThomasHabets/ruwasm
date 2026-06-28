@@ -1,15 +1,12 @@
 // This file is for stuff in the main (UI) thread.
-use std::cell::Cell;
 use std::cell::OnceCell;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use async_channel::{Receiver, Sender};
 use log::{debug, error, info, warn};
 use rustradio::Float;
-use rustradio::data_stream::{
-    BytesReader, DataStreamId, PROTOCOL_VERSION, Packet, RequestData, SyncWriter,
-};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::js_sys;
@@ -21,7 +18,7 @@ use web_sys::{
 
 use crate::js_performance_now;
 use crate::{Ax25Messages, MainToWorker, WorkerToMain};
-use rustradio_ui::SharedVecPtr;
+use rustradio_ui::{BootstrapMpsc, TaggedVec};
 
 const HTML_DISABLED: &str = "disabled";
 const ID_RESULT: &str = "result";
@@ -63,60 +60,30 @@ enum InputSource {
 }
 
 thread_local! {
+    static WORKER_TX: RefCell<Option<Sender<MainToWorker>>> = const { RefCell::new(None)} ;
+
     static WORKER: OnceCell<Worker> = const { OnceCell::new() };
     static FILE: RefCell<Option<File>> = const { RefCell::new(None) };
-    static FILE_DATA_STREAM_READER: RefCell<BytesReader> = RefCell::new(BytesReader::new());
-    static FILE_DATA_STREAM_VERSION_SENT: Cell<bool> = const { Cell::new(false) };
-    static FILE_DATA_STREAM_PEER_VERSION_SEEN: Cell<bool> = const { Cell::new(false) };
-    static FILE_DATA_STREAM_POS: RefCell<HashMap<DataStreamId, u64>> = RefCell::new(HashMap::new());
+    static FILE_POS: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
+    static PENDING_FILE_REQUESTS: RefCell<Vec<(String, usize)>> = const { RefCell::new(Vec::new()) };
     static INPUT_SOURCE: RefCell<InputSource> = const { RefCell::new(InputSource::None) };
-    static PENDING_WORKER_DATA_STREAM: RefCell<Vec<Vec<u8>>> = const { RefCell::new(Vec::new()) };
     static AUDIO_PLAYBACK: RefCell<Option<AudioPlayback>> = const { RefCell::new(None) };
     static WS_SOCKET: RefCell<Option<WebSocket>> = const { RefCell::new(None) };
 }
 
-#[allow(clippy::enum_glob_use)]
-fn forget_shared(msg: MainToWorker) {
-    use rustradio_ui::MainToWorker::*;
-    match msg {
-        // Ignore all the messages that don't have shared data.
-        Start(_) | ApplicationSpecific(_) | DataStream(_) | Ping(_) | Pong(_) => {}
-        SharedByte(_, v) => {
-            for e in v {
-                e.forget();
-            }
-        }
-    }
-}
-
-#[allow(clippy::enum_glob_use)]
-fn drop_shared(msg: MainToWorker) {
-    use rustradio_ui::MainToWorker::*;
-    match msg {
-        // Ignore all the messages that don't have shared data.
-        Start(_) | ApplicationSpecific(_) | DataStream(_) | Ping(_) | Pong(_) => {}
-        SharedByte(_, v) => {
-            for e in v {
-                let _ = e.into_vec();
-            }
-        }
-    }
-}
-fn post_message_inner(msg: &MainToWorker) -> Result<(), JsValue> {
+fn post_message(msg: &MainToWorker) -> Result<(), JsValue> {
     let msg = serde_wasm_bindgen::to_value(msg)?;
     worker().post_message(&msg)
 }
 
-pub(crate) fn post_message(msg: MainToWorker) -> Result<(), JsValue> {
-    match post_message_inner(&msg) {
-        Ok(()) => {
-            forget_shared(msg);
-            Ok(())
-        }
-        Err(e) => {
-            drop_shared(msg);
-            Err(e)
-        }
+/// Send an owned message through the shared-memory channel once it is ready.
+async fn send_message(msg: MainToWorker) -> Result<(), JsValue> {
+    if let Some(ch) = WORKER_TX.with(|slot| slot.borrow().clone()) {
+        ch.send(msg)
+            .await
+            .map_err(|_| JsValue::from_str("failed to send to worker"))
+    } else {
+        post_message(&msg)
     }
 }
 
@@ -253,176 +220,74 @@ async fn read_data(start: u64, size: u64) -> Result<Vec<u8>, JsValue> {
     let file = FILE
         .with(|slot| slot.borrow().clone())
         .ok_or_else(|| wasm_bindgen::JsValue::from_str("no file set"))?;
-    let blob = file.slice_with_f64_and_f64(start as f64, (start + size) as f64)?;
+    let blob = file.slice_with_f64_and_f64(start as f64, start.saturating_add(size) as f64)?;
     let js = JsFuture::from(blob.array_buffer()).await?;
     let buf: js_sys::ArrayBuffer = js.dyn_into()?;
     Ok(Uint8Array::new(&buf).to_vec())
 }
 
-/// Convert file-supplier protocol errors into browser callback errors.
-fn file_data_stream_error(err: impl std::fmt::Display) -> JsValue {
-    JsValue::from_str(&format!("DATA_STREAM file input error: {err}"))
+/// Clear positions when a new file is selected.
+fn reset_file_stream_state() {
+    FILE_POS.with(|slot| slot.borrow_mut().clear());
 }
 
-/// Return whether the next file-supplier packet must include Version.
-fn take_file_data_stream_needs_version() -> bool {
-    FILE_DATA_STREAM_VERSION_SENT.with(|slot| {
-        if slot.get() {
-            false
-        } else {
-            slot.set(true);
-            true
-        }
-    })
-}
-
-/// Send the file supplier's DATA_STREAM Version packet to the worker.
-fn send_file_data_stream_version() -> Result<(), JsValue> {
-    if !take_file_data_stream_needs_version() {
-        return Ok(());
+/// Send the next requested range of the selected file to the worker.
+async fn satisfy_file_request(stream: String, amount: usize) -> Result<(), JsValue> {
+    if amount == 0 {
+        return Err(JsValue::from_str(
+            "worker requested a zero-length file chunk",
+        ));
     }
 
-    let mut packet = Vec::new();
-    SyncWriter::new(&mut packet)
-        .write_version()
-        .map_err(file_data_stream_error)?;
-    post_message(MainToWorker::DataStream(packet))
-}
+    let pos = FILE_POS.with(|slot| *slot.borrow().get(&stream).unwrap_or(&0));
+    let amount =
+        u64::try_from(amount).map_err(|_| JsValue::from_str("file request size is too large"))?;
+    let data = read_data(pos, amount).await?;
+    let len = data.len() as u64;
 
-/// Send one DATA_STREAM Data packet from the selected file to the worker.
-fn send_file_data_stream_data(stream_id: &DataStreamId, data: &[u8]) -> Result<(), JsValue> {
-    let mut packet = Vec::new();
-    {
-        let mut writer = SyncWriter::new(&mut packet);
-        if take_file_data_stream_needs_version() {
-            writer.write_version().map_err(file_data_stream_error)?;
-        }
-        writer
-            .write_data(stream_id, data)
-            .map_err(file_data_stream_error)?;
-    }
     debug!(
-        "Main: sending {} file input byte(s) to worker over DATA_STREAM",
+        "Main: sending {} file byte(s) for stream {stream} at offset {pos} for stream {stream}",
         data.len()
     );
-    post_message(MainToWorker::DataStream(packet))
-}
+    send_message(MainToWorker::Bytes(
+        stream.clone(),
+        vec![TaggedVec {
+            data,
+            tags: Vec::new(),
+        }],
+    ))
+    .await?;
 
-/// Clear all file-supplier protocol state for a new selected file.
-fn reset_file_data_stream_state() {
-    FILE_DATA_STREAM_READER.with(|slot| slot.borrow_mut().clear());
-    FILE_DATA_STREAM_VERSION_SENT.with(|slot| slot.set(false));
-    FILE_DATA_STREAM_PEER_VERSION_SEEN.with(|slot| slot.set(false));
-    FILE_DATA_STREAM_POS.with(|slot| slot.borrow_mut().clear());
-}
-
-/// Feed worker protocol bytes into the file supplier parser.
-fn append_file_data_stream_bytes(data: &[u8]) -> Result<Vec<Packet>, JsValue> {
-    FILE_DATA_STREAM_READER.with(|slot| {
-        let mut reader = slot.borrow_mut();
-        reader.push_bytes(data);
-        let mut packets = Vec::new();
-
-        loop {
-            let Some(packet) = reader.read_packet().map_err(file_data_stream_error)? else {
-                break;
-            };
-            packets.push(packet);
-        }
-
-        Ok(packets)
-    })
-}
-
-/// Satisfy one worker RequestData packet by reading bytes from the selected file.
-async fn satisfy_file_data_request(req: RequestData) -> Result<(), JsValue> {
-    let pos = FILE_DATA_STREAM_POS.with(|slot| {
-        let positions = slot.borrow();
-        *positions.get(&req.stream_id).unwrap_or(&0)
+    FILE_POS.with(|slot| {
+        slot.borrow_mut().insert(stream, pos.saturating_add(len));
     });
-    // TODO: Confirm that we're reading the right file.
-    let data = read_data(pos, req.window as u64).await?;
-    FILE_DATA_STREAM_POS.with(|slot| {
-        slot.borrow_mut()
-            .insert(req.stream_id.clone(), pos + data.len() as u64);
-    });
-    send_file_data_stream_data(&req.stream_id, &data)
+    Ok(())
 }
 
-/// Apply one worker DATA_STREAM packet to the file supplier state.
-async fn handle_file_data_stream_packet(packet: Packet) -> Result<(), JsValue> {
-    match packet {
-        Packet::Version(PROTOCOL_VERSION) => {
-            info!("DataStream protocol version accepted");
-            FILE_DATA_STREAM_PEER_VERSION_SEEN.with(|slot| slot.set(true));
-            Ok(())
-        }
-        Packet::Version(version) => Err(file_data_stream_error(format!(
-            "unsupported protocol version {version}"
-        ))),
-        Packet::RequestData(req) => {
-            if !FILE_DATA_STREAM_PEER_VERSION_SEEN.with(std::cell::Cell::get) {
-                return Err(file_data_stream_error(
-                    "peer sent RequestData before Version packet",
-                ));
-            }
-            satisfy_file_data_request(req).await
-        }
-        Packet::Data(data) => Err(file_data_stream_error(format!(
-            "unexpected Data packet for {} with {} byte(s)",
-            data.stream_id,
-            data.data.len()
-        ))),
-    }
+/// Queue requests made before the user has selected an input source.
+fn store_pending_file_request(stream: String, amount: usize) {
+    PENDING_FILE_REQUESTS.with(|slot| slot.borrow_mut().push((stream, amount)));
 }
 
-/// Decode and handle all complete DATA_STREAM packets sent by the worker.
-async fn handle_file_data_stream_bytes(data: &[u8]) -> Result<(), JsValue> {
-    for packet in append_file_data_stream_bytes(data)? {
-        handle_file_data_stream_packet(packet).await?;
+/// Satisfy requests that arrived while the file chooser was still active.
+async fn flush_pending_file_requests() -> Result<(), JsValue> {
+    let requests = PENDING_FILE_REQUESTS.with(|slot| std::mem::take(&mut *slot.borrow_mut()));
+    for (stream, amount) in requests {
+        satisfy_file_request(stream, amount).await?;
     }
     Ok(())
 }
 
-/// Route worker DATA_STREAM bytes to the active input source.
-async fn handle_worker_data_stream(data: Vec<u8>) -> Result<(), JsValue> {
-    route_worker_data_stream(data).await
-}
-
-/// Hold worker protocol bytes until an input source can receive them.
-fn store_pending_worker_data_stream(data: Vec<u8>) {
-    PENDING_WORKER_DATA_STREAM.with(|slot| slot.borrow_mut().push(data));
-}
-
-/// Take all worker protocol bytes held while waiting for source setup.
-fn take_pending_worker_data_stream() -> Vec<Vec<u8>> {
-    PENDING_WORKER_DATA_STREAM.with(|slot| std::mem::take(&mut *slot.borrow_mut()))
-}
-
-/// Replay held worker protocol bytes into the now-active input source.
-async fn flush_pending_worker_data_stream() -> Result<(), JsValue> {
-    for data in take_pending_worker_data_stream() {
-        route_worker_data_stream(data).await?;
-    }
-    Ok(())
-}
-
-/// Deliver worker protocol bytes or queue them until the source is ready.
-async fn route_worker_data_stream(data: Vec<u8>) -> Result<(), JsValue> {
+/// Route a worker pull request to the selected file source.
+async fn handle_request_data(stream: String, amount: usize) -> Result<(), JsValue> {
     match input_source() {
-        InputSource::File => handle_file_data_stream_bytes(&data).await,
-        InputSource::WebSocket if websocket_is_open() => websocket_send_bytes(&data),
-        InputSource::WebSocket => {
-            info!("Main: waiting for websocket open before routing DATA_STREAM bytes");
-            store_pending_worker_data_stream(data);
-            Ok(())
-        }
-        InputSource::RtlSdr => Ok(()), // TOOD: do something?
+        InputSource::File => satisfy_file_request(stream, amount).await,
         InputSource::None => {
-            info!("Main: waiting for an input source before routing DATA_STREAM bytes");
-            store_pending_worker_data_stream(data);
+            info!("Main: waiting for a file selection before serving stream {stream}");
+            store_pending_file_request(stream, amount);
             Ok(())
         }
+        InputSource::WebSocket | InputSource::RtlSdr => Ok(()),
     }
 }
 
@@ -451,93 +316,31 @@ fn clear_input_source() {
     INPUT_SOURCE.with(|slot| *slot.borrow_mut() = InputSource::None);
 }
 
-/// Return whether the browser WebSocket can currently accept bytes.
-fn websocket_is_open() -> bool {
-    WS_SOCKET.with(|slot| {
-        let socket = slot.borrow();
-        match socket.as_ref() {
-            Some(ws) => ws.ready_state() == WebSocket::OPEN,
-            None => false,
-        }
-    })
-}
-
-/// Send one serialized DATA_STREAM packet over the browser WebSocket.
-fn websocket_send_bytes(data: &[u8]) -> Result<(), JsValue> {
-    WS_SOCKET.with(|slot| {
-        let ws = slot
-            .borrow()
-            .clone()
-            .ok_or_else(|| JsValue::from_str("websocket is not connected"))?;
-        ws.send_with_u8_array(data)
-    })
-}
-
-/// Surface a WebSocket relay failure and close the socket so the worker sees
-/// EOF through the normal close path.
-fn close_websocket_after_error(err: &JsValue) {
-    error!("Main: websocket DATA_STREAM error: {err:?}");
-    let _ = set_content(ID_RESULT, "WebSocket DATA_STREAM protocol error.");
-    WS_SOCKET.with(|slot| {
-        if let Some(ws) = slot.borrow().as_ref() {
-            let _ = ws.close();
-        }
-    });
-}
-
 /// Handle message sent from the worker.
-async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
-    match e.data().try_into()? {
-        WorkerToMain::SharedFloat(name, streams) => {
-            let streams = streams
-                .into_iter()
-                .map(rustradio_ui::SharedVecPtr::into_vec)
-                .collect();
-            match name.as_str() {
-                "iq_mag" => crate::time_sink::update(streams)?,
-                "iq_spectrum" => crate::spectrum_sink::update(streams)?,
-                "audio_demod" => {
-                    for stream in streams {
-                        enqueue_audio_samples(stream.data)?;
-                    }
+async fn worker_msg(msg: WorkerToMain) -> Result<(), JsValue> {
+    match msg {
+        WorkerToMain::Floats(name, streams) => match name.as_str() {
+            "iq_mag" => crate::time_sink::update(streams)?,
+            "iq_spectrum" => crate::spectrum_sink::update(streams)?,
+            "audio_demod" => {
+                for stream in streams {
+                    enqueue_audio_samples(stream.data)?;
                 }
-                other => log::error!("Unknown float vec: {other}"),
             }
+            other => log::error!("Unknown float vec: {other}"),
+        },
+        WorkerToMain::RequestData(name, amount) => {
+            handle_request_data(name, amount).await?;
         }
-        WorkerToMain::SharedComplex(name, streams) => {
+        WorkerToMain::Complexes(name, streams) => {
             assert_eq!(name, "iq_constellation");
-            let streams: Vec<_> = streams
-                .into_iter()
-                .map(rustradio_ui::SharedVecPtr::into_vec)
-                .collect();
             crate::constellation_sink::update(streams)?;
         }
-        /*
-        Ax25Messages::FloatPduStreams(streams) => {
-            let streams: Vec<_> = streams
-                .into_iter()
-                .map(|s| FloatPduStream {
-                    name: s.name,
-                    tags: s.tags,
-                    sample_rate: 1000.0, // TODO
-                    samples: SharedVec::new(s.vec, post_release_shared_buffer),
-                })
-                .collect();
-            crate::spectrum_sink::update(streams)?;
-        }
-        */
         WorkerToMain::ApplicationSpecific(msg) => match msg {
             Ax25Messages::Decoded(x) => {
                 set_content(ID_RESULT, &format!("Decoded: {x:?}"))?;
             }
         },
-        WorkerToMain::DataStream(data) => {
-            debug!(
-                "Main: handling {} DATA_STREAM byte(s) from worker",
-                data.len()
-            );
-            handle_worker_data_stream(data).await?;
-        }
         WorkerToMain::Ready(_todo) => {
             info!("Main: Received WorkerToMain::Ready");
             worker_msg_ready().await?;
@@ -548,9 +351,8 @@ async fn worker_msg(e: MessageEvent) -> Result<(), JsValue> {
         WorkerToMain::LogLine { level, line } => {
             log::log!(level, "[worker] {line}");
         }
-        WorkerToMain::FloatStreams(_) | WorkerToMain::ComplexStreams(_) => {}
         WorkerToMain::Ping(t) => {
-            post_message(MainToWorker::Pong(t)).unwrap();
+            post_message(&MainToWorker::Pong(t)).unwrap();
         }
         WorkerToMain::Pong(from) => {
             let to = js_performance_now();
@@ -664,16 +466,6 @@ async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> 
     }
     sdr.reset_buffer().await?;
 
-    // Init stream.
-    {
-        let packet =
-            rustradio::data_stream::PacketRef::Version(rustradio::data_stream::PROTOCOL_VERSION);
-        let mut buf: Vec<u8> = Vec::new();
-        let mut w: SyncWriter<&mut Vec<u8>> = rustradio::data_stream::SyncWriter::new(&mut buf);
-        w.write_packet(packet)?;
-        post_message(MainToWorker::DataStream(buf))?;
-    }
-
     // Stream data.
     //
     // Two bytes per sample, so `bytes / sample_rate / 2` seconds.
@@ -698,10 +490,17 @@ async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> 
             js_performance_now() + 1_000.0f64 * ((bytes.len() / 2) as f64) / f64::from(actual_rate);
         assert!(bytes.len().is_multiple_of(2));
         log::trace!("Read {} bytes from rtlsdr", bytes.len());
-        post_message(MainToWorker::SharedByte(
-            "rtl-sdr".into(),
-            vec![SharedVecPtr::new(bytes, &[])],
-        ))?;
+        if let Some(ch) = WORKER_TX.with(|slot| slot.borrow_mut().clone()) {
+            ch.send(MainToWorker::Bytes(
+                "rtl-sdr".into(),
+                vec![TaggedVec {
+                    data: bytes,
+                    tags: vec![],
+                }],
+            ))
+            .await
+            .map_err(|_| JsValue::from_str("failed to send to worker"))?;
+        }
     }
 }
 
@@ -790,7 +589,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
     {
         let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
             info!("ping button clicked");
-            post_message(MainToWorker::Ping(js_performance_now()))?;
+            post_message(&MainToWorker::Ping(js_performance_now()))?;
             Ok(())
         });
         let btn = get_element(ID_PING)?.dyn_into::<web_sys::HtmlButtonElement>()?;
@@ -840,7 +639,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
             crate::time_sink::set_sample_rate(crate::worker::VIZ_SAMPLE_RATE as f64);
             ensure_audio_playback()?;
             reset_audio_schedule();
-            post_message(MainToWorker::Start(crate::Ax25Start {
+            post_message(&MainToWorker::Start(crate::Ax25Start {
                 samp_rate,
                 offset,
                 rtlsdr,
@@ -930,11 +729,39 @@ pub(crate) fn worker() -> Worker {
                 move |e: MessageEvent| {
                     if !bootstrapped {
                         bootstrapped = crate::start_worker::msg(&e);
+
+                        if bootstrapped {
+                            info!("Bootstrap done");
+                            let (wtx, mrx): (Sender<WorkerToMain>, Receiver<WorkerToMain>) =
+                                async_channel::bounded(10);
+                            let (mtx, wrx): (Sender<MainToWorker>, Receiver<MainToWorker>) =
+                                async_channel::bounded(10);
+                            let b = Box::new(BootstrapMpsc { rx: wrx, tx: wtx });
+                            post_message(&MainToWorker::BootstrapMpsc(Box::into_raw(b) as usize))
+                                .unwrap();
+                            WORKER_TX.with(|slot| *slot.borrow_mut() = Some(mtx));
+                            spawn_local(async move {
+                                while let Ok(msg) = mrx.recv().await {
+                                    //info!("Received message {msg:?}");
+                                    if let Err(e) = worker_msg(msg).await {
+                                        error!("Error handling send message: {e:?}");
+                                    }
+                                }
+                            });
+                        }
                         return Ok(());
                     }
                     spawn_local(async move {
-                        if let Err(e) = worker_msg(e).await {
-                            error!("Main: Inner receiver thing: {e:?}");
+                        match e.data().try_into() {
+                            Ok(msg) => {
+                                warn!("Received posted {msg:?}");
+                                if let Err(e) = worker_msg(msg).await {
+                                    error!("Main: Inner receiver thing: {e:?}");
+                                }
+                            }
+                            Err(err) => {
+                                error!("Failed to deserialize posted message {e:?}: {err:?}");
+                            }
                         }
                     });
                     Ok(())
@@ -1009,7 +836,6 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
             return Err(JsValue::from_str(&err_str));
         }
     }
-
     // Init the worker.
     worker();
 
@@ -1058,16 +884,11 @@ fn install_file_chunk_listener(input: HtmlInputElement) -> Result<(), JsValue> {
             FILE.with(|slot| {
                 *slot.borrow_mut() = Some(file);
             });
-            reset_file_data_stream_state();
+            reset_file_stream_state();
             spawn_local(async {
-                let result = async {
-                    flush_pending_worker_data_stream().await?;
-                    send_file_data_stream_version()
-                }
-                .await;
-                if let Err(e) = result {
-                    error!("Main: failed to start file DATA_STREAM input: {e:?}");
-                    let _ = set_content(ID_RESULT, "File DATA_STREAM protocol error.");
+                if let Err(e) = flush_pending_file_requests().await {
+                    error!("Main: failed to start file input: {e:?}");
+                    let _ = set_content(ID_RESULT, "File input error.");
                 }
             });
             Ok(())
@@ -1111,11 +932,6 @@ fn connect_websocket(url: &str) -> Result<(), JsValue> {
         let onopen = Closure::<dyn FnMut(Event)>::new(move |_event: Event| {
             info!("Main: websocket input connected to {url}");
             let _ = set_content(ID_RESULT, "WebSocket connected. Waiting for DATA_STREAM…");
-            spawn_local(async {
-                if let Err(e) = flush_pending_worker_data_stream().await {
-                    close_websocket_after_error(&e);
-                }
-            });
         });
         ws.set_onopen(Some(onopen.as_ref().unchecked_ref()));
         onopen.forget();
@@ -1124,10 +940,13 @@ fn connect_websocket(url: &str) -> Result<(), JsValue> {
     {
         let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
             match websocket_message_bytes(event.data()) {
-                Some(data) => {
+                Some(_data) => {
+                    // TODO: re-implement.
+                    /*
                     if let Err(e) = post_message(MainToWorker::DataStream(data)) {
                         close_websocket_after_error(&e);
                     }
+                    */
                 }
                 None => {
                     warn!(
@@ -1152,9 +971,11 @@ fn connect_websocket(url: &str) -> Result<(), JsValue> {
     {
         let onclose = Closure::<dyn FnMut(Event)>::new(move |_event: Event| {
             info!("Main: websocket input closed");
+            /*
             if let Err(e) = post_message(MainToWorker::DataStream(Vec::new())) {
                 error!("Main: failed to send websocket disconnect to worker: {e:?}");
             }
+            */
             let _ = set_content(ID_RESULT, "WebSocket input closed.");
             WS_SOCKET.with(|slot| {
                 slot.borrow_mut().take();
