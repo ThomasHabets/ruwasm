@@ -12,8 +12,7 @@ use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::js_sys;
 use web_sys::js_sys::Uint8Array;
 use web_sys::{
-    AudioContext, BinaryType, Element, Event, File, GainNode, HtmlInputElement, MessageEvent,
-    WebSocket, Worker,
+    BinaryType, Element, Event, File, HtmlInputElement, MessageEvent, WebSocket, Worker,
 };
 
 use crate::js_performance_now;
@@ -37,19 +36,8 @@ const ID_RTLSDR_FREQUENCY: &str = "input-rtlsdr-frequency";
 const ID_OFFSET: &str = "input-offset";
 const ID_RTLSDR_GAIN_AUTO: &str = "input-rtlsdr-gain-auto";
 const ID_RTLSDR_GAIN: &str = "input-rtlsdr-gain";
-const AUDIO_SAMPLE_RATE: f32 = 44_100.0;
-const AUDIO_START_LATENCY_SECONDS: f64 = 0.08;
-const AUDIO_TARGET_LATENCY_SECONDS: f64 = 0.10;
-const AUDIO_MAX_LATENCY_SECONDS: f64 = 1.0;
-const AUDIO_MAX_PLAYBACK_RATE: f32 = 1.02;
 const RTLSDR_MIN_GAIN_TENTHS_DB: i32 = -100;
 const RTLSDR_MAX_GAIN_TENTHS_DB: i32 = 500;
-
-struct AudioPlayback {
-    context: AudioContext,
-    gain: GainNode,
-    next_time: f64,
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum InputSource {
@@ -67,7 +55,6 @@ thread_local! {
     static FILE_POS: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
     static PENDING_FILE_REQUESTS: RefCell<Vec<(String, usize)>> = const { RefCell::new(Vec::new()) };
     static INPUT_SOURCE: RefCell<InputSource> = const { RefCell::new(InputSource::None) };
-    static AUDIO_PLAYBACK: RefCell<Option<AudioPlayback>> = const { RefCell::new(None) };
     static WS_SOCKET: RefCell<Option<WebSocket>> = const { RefCell::new(None) };
 }
 
@@ -85,135 +72,6 @@ async fn send_message(msg: MainToWorker) -> Result<(), JsValue> {
     } else {
         post_message(&msg)
     }
-}
-
-/// Read and clamp the current Web Audio volume control value.
-fn audio_volume() -> Result<f32, JsValue> {
-    Ok(get_element(ID_AUDIO_VOLUME)?
-        .dyn_into::<HtmlInputElement>()?
-        .value()
-        .parse::<f32>()
-        .unwrap_or(0.25)
-        .clamp(0.0, 1.0))
-}
-
-/// Lazily create the Web Audio graph and keep its gain node in sync.
-fn ensure_audio_playback() -> Result<(), JsValue> {
-    let volume = audio_volume()?;
-    AUDIO_PLAYBACK.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if let Some(audio) = slot.as_mut() {
-            audio.gain.gain().set_value(volume);
-            let _ = audio.context.resume()?;
-            return Ok(());
-        }
-
-        let context = AudioContext::new()?;
-        let gain = context.create_gain()?;
-        gain.gain().set_value(volume);
-        gain.connect_with_audio_node(context.destination().unchecked_ref())?;
-        let _ = context.resume()?;
-        let next_time = context.current_time() + AUDIO_START_LATENCY_SECONDS;
-        *slot = Some(AudioPlayback {
-            context,
-            gain,
-            next_time,
-        });
-        Ok(())
-    })
-}
-
-/// Restart sample scheduling slightly in the future to avoid immediate underruns.
-fn reset_audio_schedule() {
-    AUDIO_PLAYBACK.with(|slot| {
-        if let Some(audio) = slot.borrow_mut().as_mut() {
-            audio.next_time = audio.context.current_time() + AUDIO_START_LATENCY_SECONDS;
-        }
-    });
-}
-
-/// Apply the current slider value to an already-created audio graph.
-fn update_audio_volume() -> Result<(), JsValue> {
-    let volume = audio_volume()?;
-    AUDIO_PLAYBACK.with(|slot| {
-        if let Some(audio) = slot.borrow().as_ref() {
-            audio.gain.gain().set_value(volume);
-        }
-    });
-    Ok(())
-}
-
-/// Return the bounded playback rate to use for the current queued latency.
-fn audio_playback_rate(queued_seconds: f64) -> f32 {
-    let excess = queued_seconds - AUDIO_TARGET_LATENCY_SECONDS;
-    if excess <= 0.0 {
-        return 1.0;
-    }
-
-    let correction_range = AUDIO_MAX_LATENCY_SECONDS - AUDIO_TARGET_LATENCY_SECONDS;
-    let correction = (excess / correction_range).clamp(0.0, 1.0) as f32;
-    1.0 + (AUDIO_MAX_PLAYBACK_RATE - 1.0) * correction
-}
-
-/// Queue one demodulated audio chunk for browser playback.
-fn enqueue_audio_samples(mut samples: Vec<f32>) -> Result<(), JsValue> {
-    if samples.is_empty() {
-        return Ok(());
-    }
-
-    ensure_audio_playback()?;
-    for sample in &mut samples {
-        *sample = sample.clamp(-1.0, 1.0);
-    }
-
-    AUDIO_PLAYBACK.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        let audio = slot
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("audio playback is not initialized"))?;
-        let now = audio.context.current_time();
-        let start_time = audio.next_time.max(now + AUDIO_START_LATENCY_SECONDS);
-        let queued_seconds = (start_time - now).max(0.0);
-        let playback_rate = audio_playback_rate(queued_seconds);
-        let max_end_time = now + AUDIO_MAX_LATENCY_SECONDS;
-        let available_seconds = (max_end_time - start_time).max(0.0);
-        let max_samples =
-            (available_seconds * f64::from(AUDIO_SAMPLE_RATE) * f64::from(playback_rate)).floor()
-                as usize;
-        let sample_offset = samples.len().saturating_sub(max_samples);
-        if sample_offset == samples.len() {
-            info!(
-                "Main: dropping {} audio samples; queued audio is {:.0}ms",
-                samples.len(),
-                queued_seconds * 1000.0
-            );
-            return Ok(());
-        }
-        if sample_offset > 0 {
-            info!(
-                "Main: dropping {} audio samples to keep queued audio below {:.0}ms",
-                sample_offset,
-                AUDIO_MAX_LATENCY_SECONDS * 1000.0
-            );
-        }
-        let samples = &samples[sample_offset..];
-        let len =
-            u32::try_from(samples.len()).map_err(|_| JsValue::from_str("audio chunk too large"))?;
-        let buffer = audio.context.create_buffer(1, len, AUDIO_SAMPLE_RATE)?;
-        // AudioBuffer.copyToChannel rejects views backed by shared Wasm memory.
-        let channel = js_sys::Float32Array::new_with_length(len);
-        channel.copy_from(samples);
-        buffer.copy_to_channel_with_f32_array(&channel, 0)?;
-
-        let source = audio.context.create_buffer_source()?;
-        source.set_buffer(Some(&buffer));
-        source.playback_rate().set_value(playback_rate);
-        source.connect_with_audio_node(audio.gain.unchecked_ref())?;
-        source.start_with_when(start_time)?;
-        audio.next_time = start_time
-            + samples.len() as f64 / f64::from(AUDIO_SAMPLE_RATE) / f64::from(playback_rate);
-        Ok(())
-    })
 }
 
 async fn read_data(start: u64, size: u64) -> Result<Vec<u8>, JsValue> {
@@ -323,9 +181,8 @@ async fn worker_msg(msg: WorkerToMain) -> Result<(), JsValue> {
             "iq_mag" => crate::time_sink::update(streams)?,
             "iq_spectrum" => crate::spectrum_sink::update(streams)?,
             "audio_demod" => {
-                for stream in streams {
-                    enqueue_audio_samples(stream.data)?;
-                }
+                assert_eq!(streams.len(), 1);
+                rustradio_ui::browser_audio::enqueue(streams[0].data.iter().copied())?;
             }
             other => log::error!("Unknown float vec: {other}"),
         },
@@ -602,7 +459,13 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
     {
         let input = get_element(ID_AUDIO_VOLUME)?.dyn_into::<HtmlInputElement>()?;
         let handler = Closure::<dyn FnMut(Event) -> Result<(), JsValue>>::new(move |_event| {
-            update_audio_volume()?;
+            let volume = get_element(ID_AUDIO_VOLUME)?
+                .dyn_into::<HtmlInputElement>()?
+                .value()
+                .parse::<f32>()
+                .unwrap_or(0.25)
+                .clamp(0.0, 1.0);
+            rustradio_ui::browser_audio::set_volume(volume);
             Ok(())
         });
         input.add_event_listener_with_callback("input", handler.as_ref().unchecked_ref())?;
@@ -637,8 +500,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
                 .dyn_into::<web_sys::HtmlInputElement>()?
                 .checked();
             crate::time_sink::set_sample_rate(crate::worker::VIZ_SAMPLE_RATE as f64);
-            ensure_audio_playback()?;
-            reset_audio_schedule();
+            rustradio_ui::browser_audio::reset()?;
             post_message(&MainToWorker::Start(crate::Ax25Start {
                 samp_rate,
                 offset,
