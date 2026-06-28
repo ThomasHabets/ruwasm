@@ -21,7 +21,6 @@ mod mainthread;
 mod spectrum_sink;
 mod time_sink;
 mod wasm_graph;
-mod wasm_source;
 mod worker;
 
 type MainToWorker = rustradio_ui::MainToWorker<Ax25MainToWorker>;

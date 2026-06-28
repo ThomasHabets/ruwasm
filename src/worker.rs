@@ -8,7 +8,7 @@ use rustradio::blockchain;
 use rustradio::blocks::*;
 use rustradio::graph::GraphRunner;
 use rustradio::stream::ReadStream;
-use rustradio_ui::worker::{post_message, send_message, send_message_sync};
+use rustradio_ui::worker::{post_message, send_message, send_message_sync, source};
 use rustradio_ui::{BootstrapMpsc, TaggedVec};
 
 use log::{error, info, warn};
@@ -19,7 +19,6 @@ use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 use crate::Ax25Messages;
 use crate::RECEIVER_SOURCE_ID;
 use crate::js_performance_now;
-use crate::wasm_source;
 use crate::{MainToWorker, WorkerToMain};
 
 type FloatSink = rustradio_ui::worker::FloatSink<crate::Ax25WorkerToMain>;
@@ -35,7 +34,7 @@ const SPECTRUM_SIZE: usize = 256;
 
 /// Channels used to pass source data into a running graph.
 struct GraphComms {
-    src: HashMap<String, async_channel::Sender<crate::wasm_source::Msg>>,
+    src: HashMap<String, async_channel::Sender<source::Msg<u8>>>,
     graph: async_channel::Sender<()>,
 }
 
@@ -44,7 +43,7 @@ thread_local! {
 }
 
 /// Send one control or data message to the graph source for a receiver.
-async fn send_source_msg(id: &str, msg: wasm_source::Msg) -> Result<(), JsValue> {
+async fn send_source_msg(id: &str, msg: source::Msg<u8>) -> Result<(), JsValue> {
     let Some(comms) = GRAPH_COMMS.with(|cell| {
         let cell = cell.clone();
         cell.get().map(Clone::clone)
@@ -74,25 +73,17 @@ async fn send_source_msg(id: &str, msg: wasm_source::Msg) -> Result<(), JsValue>
     Ok(())
 }
 
-/// Ask the main UI thread for another source chunk.
-pub(crate) fn request_receiver_data(receiver: &str, _pos: u64, size: u64) -> rustradio::Result<()> {
-    let size = usize::try_from(size)
-        .map_err(|_| rustradio::Error::msg("source request size does not fit usize"))?;
-    send_message_sync(WorkerToMain::RequestData(receiver.to_string(), size))?;
-    Ok(())
-}
-
 /// Convert one shared-memory byte message into a graph-source update.
-fn source_msg_from_bytes(streams: Vec<TaggedVec<u8>>) -> wasm_source::Msg {
+fn source_msg_from_bytes(streams: Vec<TaggedVec<u8>>) -> source::Msg<u8> {
     let mut streams = streams.into_iter();
     let mut data = streams.next().map(|stream| stream.data).unwrap_or_default();
     for stream in streams {
         data.extend(stream.data);
     }
     if data.is_empty() {
-        wasm_source::Msg::Eof
+        source::Msg::Eof
     } else {
-        wasm_source::Msg::Extend(data)
+        source::Msg::Extend(data)
     }
 }
 
@@ -212,7 +203,8 @@ async fn radio_1200(samp_rate: u64, offset: Float, rtlsdr: bool) -> rustradio::R
 
     // Set up source block.
     let mut g = crate::wasm_graph::WasmGraph::new();
-    let (src, prev, src_tx) = crate::wasm_source::WasmSource::new();
+    let (src, prev, src_tx) =
+        source::WasmSource::<crate::Ax25WorkerToMain, _>::new(crate::RECEIVER_SOURCE_ID);
     g.add(Box::new(src));
 
     let prev = if rtlsdr {
@@ -429,8 +421,8 @@ fn add_viz_taps(
 #[cfg(test)]
 mod tests {
     use super::source_msg_from_bytes;
-    use crate::wasm_source::Msg;
     use rustradio_ui::TaggedVec;
+    use rustradio_ui::worker::source::Msg;
 
     #[test]
     fn empty_byte_message_is_eof() {
