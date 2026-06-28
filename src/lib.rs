@@ -16,11 +16,8 @@ use wasm_bindgen::prelude::*;
 // <https://github.com/RReverser/wasm-bindgen-rayon>.
 pub use wasm_bindgen_rayon::init_thread_pool;
 
-mod complex_sink;
 mod constellation_sink;
 mod domlogger;
-mod float_pdu_sink;
-mod float_sink;
 mod mainthread;
 mod spectrum_sink;
 mod start_worker;
@@ -63,7 +60,7 @@ struct Ax25End {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Ax25WorkerToMain {}
+pub(crate) struct Ax25WorkerToMain {}
 
 impl ApplicationSpecific for Ax25WorkerToMain {
     type App = Ax25Messages;

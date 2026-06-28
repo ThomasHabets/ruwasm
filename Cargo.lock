@@ -957,17 +957,19 @@ dependencies = [
 
 [[package]]
 name = "rustradio-ui"
-version = "0.1.12"
+version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "943f25d8193f0a0b5851bbbc31f4383464195b4d6715d6e813849b5a515461bc"
+checksum = "064912eed486ef1b5ceb3890fd8d0dcea0bc6cfadc080a6beeaa5ae00e5b3315"
 dependencies = [
  "async-channel",
  "log",
  "num-complex",
  "rustradio",
+ "rustradio_macros",
  "serde",
  "serde-wasm-bindgen",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 

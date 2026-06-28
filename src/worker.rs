@@ -1,5 +1,4 @@
 use std::cell::OnceCell;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -9,9 +8,9 @@ use rustradio::blockchain;
 use rustradio::blocks::*;
 use rustradio::graph::GraphRunner;
 use rustradio::stream::ReadStream;
+use rustradio_ui::worker::{send_message, send_message_sync};
 use rustradio_ui::{BootstrapMpsc, TaggedVec};
 
-use async_channel::Sender;
 use log::{error, info, warn};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -24,9 +23,9 @@ use crate::js_performance_now;
 use crate::wasm_source;
 use crate::{MainToWorker, WorkerToMain};
 
-thread_local! {
-    static MAIN_UI_TX: RefCell<Option<Sender<WorkerToMain>>> = const { RefCell::new(None)} ;
-}
+type FloatSink = rustradio_ui::worker::FloatSink<crate::Ax25WorkerToMain>;
+type ComplexSink = rustradio_ui::worker::ComplexSink<crate::Ax25WorkerToMain>;
+type FloatPduSink = rustradio_ui::worker::FloatPduSink<crate::Ax25WorkerToMain>;
 
 // TODO: magic values.
 const SOURCE_CHANNEL_SIZE: usize = 10;
@@ -49,25 +48,6 @@ pub(crate) fn post_message<T: Serialize + ?Sized>(msg: &T) -> Result<(), JsValue
     let msg = serde_wasm_bindgen::to_value(msg)?;
     let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
     scope.post_message(&msg)
-}
-
-pub(crate) async fn send_message(msg: WorkerToMain) -> Result<(), JsValue> {
-    if let Some(ch) = MAIN_UI_TX.with(|slot| slot.borrow_mut().clone()) {
-        ch.send(msg)
-            .await
-            .map_err(|_| JsValue::from_str("failed to send to worker"))
-    } else {
-        error!("Tried to send before worker channel set up. Falling back to posting");
-        post_message(&msg)
-    }
-}
-
-pub(crate) fn send_message_from_sync(msg: WorkerToMain) {
-    spawn_local(async move {
-        if let Err(e) = send_message(msg).await {
-            error!("Failed to send message: {e:?}");
-        }
-    });
 }
 
 /// Send one control or data message to the graph source for a receiver.
@@ -105,7 +85,7 @@ async fn send_source_msg(id: &str, msg: wasm_source::Msg) -> Result<(), JsValue>
 pub(crate) fn request_receiver_data(receiver: &str, _pos: u64, size: u64) -> rustradio::Result<()> {
     let size = usize::try_from(size)
         .map_err(|_| rustradio::Error::msg("source request size does not fit usize"))?;
-    send_message_from_sync(WorkerToMain::RequestData(receiver.to_string(), size));
+    send_message_sync(WorkerToMain::RequestData(receiver.to_string(), size))?;
     Ok(())
 }
 
@@ -128,9 +108,9 @@ async fn worker_msg(msg: MainToWorker) -> Result<(), JsValue> {
     match msg {
         MainToWorker::BootstrapMpsc(b) => {
             info!("Received main channel endpoints");
-            let BootstrapMpsc { tx, rx } = BootstrapMpsc::from_ptr(b);
-            //MAIN_UI_RX.with(|slot| *slot.borrow_mut() = Some(boot.rx));
-            MAIN_UI_TX.with(|slot| *slot.borrow_mut() = Some(tx));
+            let BootstrapMpsc { tx, rx } =
+                BootstrapMpsc::<crate::Ax25MainToWorker, crate::Ax25WorkerToMain>::from_ptr(b);
+            rustradio_ui::worker::set_main_ui_tx(tx);
             spawn_local(async move {
                 while let Ok(msg) = rx.recv().await {
                     if let Err(e) = worker_msg(msg).await {
@@ -327,9 +307,11 @@ async fn radio_1200(samp_rate: u64, offset: Float, rtlsdr: bool) -> rustradio::R
                     } else {
                         info!("Parsed: {packet:?}");
                     }
-                    send_message_from_sync(WorkerToMain::ApplicationSpecific(
+                    if let Err(e) = send_message_sync(WorkerToMain::ApplicationSpecific(
                         Ax25Messages::Decoded(format!("Last decode: {packet:?}")),
-                    ));
+                    )) {
+                        error!("Failed to send packet for logging: {e:?}");
+                    }
                 }
                 Err(e) => {
                     info!("Packet did not decode: {e}");
@@ -390,8 +372,7 @@ fn add_spectrum_tap(
         StreamToPdu::new(prev, rustradio::fft_stream::TAG_FRAME, SPECTRUM_SIZE, 1),
         PduAverage::new(prev, 10),
     ];
-    let sink =
-        crate::float_pdu_sink::FloatPduSink::new(prev, "iq_spectrum".into(), IF_SAMPLE_RATE as f32);
+    let sink = FloatPduSink::new(prev, "iq_spectrum".into());
     g.add(Box::new(sink));
 
     src
@@ -413,7 +394,7 @@ fn add_audio_tap(
             .interp(AUDIO_SAMPLE_RATE)
             .build(audio)?
     ];
-    let sink = crate::float_sink::FloatSink::new(audio, "audio_demod".into());
+    let sink = FloatSink::new(audio, "audio_demod".into());
     g.add(Box::new(sink));
 
     Ok(src)
@@ -441,9 +422,8 @@ fn add_viz_taps(
 
     let mag_prev = blockchain![g, mag_prev, ComplexToMag2::new(mag_prev)];
 
-    let constellation_sink =
-        crate::complex_sink::ComplexSink::new(constellation_prev, "iq_constellation".into());
-    let mag_sink = crate::float_sink::FloatSink::new(mag_prev, "iq_mag".into());
+    let constellation_sink = ComplexSink::new(constellation_prev, "iq_constellation".into());
+    let mag_sink = FloatSink::new(mag_prev, "iq_mag".into());
     g.add(Box::new(constellation_sink));
     g.add(Box::new(mag_sink));
 
