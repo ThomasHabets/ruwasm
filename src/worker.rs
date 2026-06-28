@@ -8,11 +8,10 @@ use rustradio::blockchain;
 use rustradio::blocks::*;
 use rustradio::graph::GraphRunner;
 use rustradio::stream::ReadStream;
-use rustradio_ui::worker::{send_message, send_message_sync};
+use rustradio_ui::worker::{post_message, send_message, send_message_sync};
 use rustradio_ui::{BootstrapMpsc, TaggedVec};
 
 use log::{error, info, warn};
-use serde::Serialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
@@ -42,12 +41,6 @@ struct GraphComms {
 
 thread_local! {
     static GRAPH_COMMS: OnceCell<Rc<futures_intrusive::sync::LocalMutex<GraphComms>>> = const { OnceCell::new() };
-}
-
-pub(crate) fn post_message<T: Serialize + ?Sized>(msg: &T) -> Result<(), JsValue> {
-    let msg = serde_wasm_bindgen::to_value(msg)?;
-    let scope = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
-    scope.post_message(&msg)
 }
 
 /// Send one control or data message to the graph source for a receiver.

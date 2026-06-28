@@ -1,23 +1,21 @@
 // This file is for stuff in the main (UI) thread.
-use std::cell::OnceCell;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use async_channel::{Receiver, Sender};
 use log::{debug, error, info, warn};
 use rustradio::Float;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::js_sys;
 use web_sys::js_sys::Uint8Array;
-use web_sys::{
-    BinaryType, Element, Event, File, HtmlInputElement, MessageEvent, WebSocket, Worker,
-};
+use web_sys::{BinaryType, Element, Event, File, HtmlInputElement, MessageEvent, WebSocket};
 
 use crate::js_performance_now;
 use crate::{Ax25Messages, MainToWorker, WorkerToMain};
-use rustradio_ui::{BootstrapMpsc, TaggedVec};
+use rustradio_ui::TaggedVec;
+
+use rustradio_ui::mainthread::{post_message, send_message, start_worker};
 
 const HTML_DISABLED: &str = "disabled";
 const ID_RESULT: &str = "result";
@@ -49,30 +47,11 @@ enum InputSource {
 }
 
 thread_local! {
-    static WORKER_TX: RefCell<Option<Sender<MainToWorker>>> = const { RefCell::new(None)} ;
-
-    static WORKER: OnceCell<Worker> = const { OnceCell::new() };
     static FILE: RefCell<Option<File>> = const { RefCell::new(None) };
     static FILE_POS: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
     static PENDING_FILE_REQUESTS: RefCell<Vec<(String, usize)>> = const { RefCell::new(Vec::new()) };
     static INPUT_SOURCE: RefCell<InputSource> = const { RefCell::new(InputSource::None) };
     static WS_SOCKET: RefCell<Option<WebSocket>> = const { RefCell::new(None) };
-}
-
-fn post_message(msg: &MainToWorker) -> Result<(), JsValue> {
-    let msg = serde_wasm_bindgen::to_value(msg)?;
-    worker().post_message(&msg)
-}
-
-/// Send an owned message through the shared-memory channel once it is ready.
-async fn send_message(msg: MainToWorker) -> Result<(), JsValue> {
-    if let Some(ch) = WORKER_TX.with(|slot| slot.borrow().clone()) {
-        ch.send(msg)
-            .await
-            .map_err(|_| JsValue::from_str("failed to send to worker"))
-    } else {
-        post_message(&msg)
-    }
 }
 
 async fn read_data(start: u64, size: u64) -> Result<Vec<u8>, JsValue> {
@@ -348,17 +327,15 @@ async fn run_rtlsdr_source(mut sdr: rtlsdr_pure::RtlSdr) -> Result<(), JsValue> 
             js_performance_now() + 1_000.0f64 * ((bytes.len() / 2) as f64) / f64::from(actual_rate);
         assert!(bytes.len().is_multiple_of(2));
         log::trace!("Read {} bytes from rtlsdr", bytes.len());
-        if let Some(ch) = WORKER_TX.with(|slot| slot.borrow_mut().clone()) {
-            ch.send(MainToWorker::Bytes(
-                "rtl-sdr".into(),
-                vec![TaggedVec {
-                    data: bytes,
-                    tags: vec![],
-                }],
-            ))
-            .await
-            .map_err(|_| JsValue::from_str("failed to send to worker"))?;
-        }
+        send_message(MainToWorker::Bytes(
+            "rtl-sdr".into(),
+            vec![TaggedVec {
+                data: bytes,
+                tags: vec![],
+            }],
+        ))
+        .await
+        .map_err(|_| JsValue::from_str("failed to send to worker"))?;
     }
 }
 
@@ -562,95 +539,6 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
     Ok(())
 }
 
-/// Give us the worker.
-pub(crate) fn worker() -> Worker {
-    WORKER.with(|cell| {
-        cell.get_or_init(|| {
-            info!("Main: Starting the worker");
-            let opts = web_sys::WorkerOptions::new();
-            opts.set_type(web_sys::WorkerType::Module);
-            opts.set_name("RustRadio worker");
-            let worker = Worker::new_with_options("./wasm-mod.js", &opts).unwrap();
-            let mut bootstrapped = false;
-
-            // Set message handler.
-            // Cloning a worker handle is cheap.
-            let handler_worker = worker.clone();
-            let onmessage = Closure::<dyn FnMut(MessageEvent) -> Result<(), JsValue>>::new(
-                move |e: MessageEvent| {
-                    if !bootstrapped {
-                        // Cloning a worker handle is cheap.
-                        bootstrapped = rustradio_ui::start_worker::msg(handler_worker.clone(), &e);
-
-                        if bootstrapped {
-                            info!("Bootstrap done");
-                            let (wtx, mrx): (Sender<WorkerToMain>, Receiver<WorkerToMain>) =
-                                async_channel::bounded(10);
-                            let (mtx, wrx): (Sender<MainToWorker>, Receiver<MainToWorker>) =
-                                async_channel::bounded(10);
-                            let b = Box::new(BootstrapMpsc { rx: wrx, tx: wtx });
-                            post_message(&MainToWorker::BootstrapMpsc(Box::into_raw(b) as usize))
-                                .unwrap();
-                            WORKER_TX.with(|slot| *slot.borrow_mut() = Some(mtx));
-                            spawn_local(async move {
-                                while let Ok(msg) = mrx.recv().await {
-                                    //info!("Received message {msg:?}");
-                                    if let Err(e) = worker_msg(msg).await {
-                                        error!("Error handling send message: {e:?}");
-                                    }
-                                }
-                            });
-                        }
-                        return Ok(());
-                    }
-                    spawn_local(async move {
-                        match e.data().try_into() {
-                            Ok(msg) => {
-                                match &msg {
-                                    WorkerToMain::LogLine { .. } => {}
-                                    _other => warn!("Main thread received posted {msg:?}"),
-                                }
-                                if let Err(e) = worker_msg(msg).await {
-                                    error!("Main: Inner receiver thing: {e:?}");
-                                }
-                            }
-                            Err(err) => {
-                                error!("Failed to deserialize posted message {e:?}: {err:?}");
-                            }
-                        }
-                    });
-                    Ok(())
-                },
-            );
-            worker.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
-            onmessage.forget();
-
-            // Set messageerror handler.
-            let onmsgerr = Closure::<dyn FnMut(MessageEvent) -> Result<(), JsValue>>::new(
-                move |e: MessageEvent| {
-                    error!("Main: Message Error: {e:?}");
-                    Ok(())
-                },
-            );
-            worker.set_onmessageerror(Some(onmsgerr.as_ref().unchecked_ref()));
-            onmsgerr.forget();
-
-            // Set error handler.
-            let onerr = Closure::<dyn FnMut(MessageEvent) -> Result<(), JsValue>>::new(
-                move |e: MessageEvent| {
-                    error!("Main: Worker error: {e:?}");
-                    Ok(())
-                },
-            );
-            worker.set_onerror(Some(onerr.as_ref().unchecked_ref()));
-            onerr.forget();
-
-            worker
-        })
-        .clone()
-    })
-}
-
 /// Get HTML element by ID.
 pub(crate) fn get_element(id: &str) -> Result<Element, JsValue> {
     let window = web_sys::window().ok_or(JsValue::from_str("no window"))?;
@@ -692,7 +580,7 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
         }
     }
     // Init the worker.
-    worker();
+    start_worker::<crate::Ax25MainToWorker, crate::Ax25WorkerToMain, _, _>(worker_msg);
 
     // Show some bootup message.
     set_content(
