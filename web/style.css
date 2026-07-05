@@ -344,24 +344,28 @@ h1 {
   align-items: end;
 }
 
-#graph-controls {
+#graph-controls,
+.rr-time-sink-controls {
   display: grid;
-  grid-template-columns: repeat(6, minmax(5.75rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(5.75rem, 1fr));
   gap: 0.65rem;
   align-items: end;
   width: 100%;
 }
 
-#graph-controls label {
+#graph-controls label,
+.rr-time-sink-controls label {
   margin: 0;
 }
 
-#graph-controls .control-field {
+#graph-controls .control-field,
+.rr-time-sink-controls .control-field {
   display: grid;
   gap: 0.35rem;
 }
 
-#float-graph {
+#float-graph,
+.rr-time-sink-canvas {
   display: block;
   width: 100%;
   height: clamp(320px, 42vh, 470px);
@@ -494,19 +498,23 @@ h1 {
     display: block;
   }
 
-  #graph-controls {
+  #graph-controls,
+  .rr-time-sink-controls {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .visual-panel-wide > .panel-header > #graph-controls {
+  .visual-panel-wide > .panel-header > #graph-controls,
+  .visual-panel-wide > .panel-header > .rr-time-sink-controls {
     margin-top: 1rem;
   }
 
-  #graph-controls button {
+  #graph-controls button,
+  .rr-time-sink-controls button {
     width: 100%;
   }
 
   #float-graph,
+  .rr-time-sink-canvas,
   .plot-surface {
     min-height: 16rem;
     height: 16rem;

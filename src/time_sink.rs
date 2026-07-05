@@ -1,227 +1,557 @@
-/// Mostly vibe coded time sink graph drawer.
-///
-/// It works as far as getting something on the screen, but requires more work.
-///
-/// Things that need fixing:
-/// * Toggle for auto scaling, not button.
-/// * The whole thing should get the complete new set of points, not append and
-///   trim.
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::rc::Rc;
 
 use log::debug;
+use rustradio::Float;
+use rustradio::stream::Tag;
+use rustradio_ui::TaggedVec;
 use wasm_bindgen::prelude::*;
 use web_sys::{
-    CanvasRenderingContext2d, Event, HtmlButtonElement, HtmlCanvasElement, HtmlInputElement,
+    CanvasRenderingContext2d, Element, Event, HtmlButtonElement, HtmlCanvasElement,
+    HtmlInputElement,
 };
 
-use crate::mainthread::get_element;
+const TIME_SINK_HTML: &str = r#"
+<div class="panel-header rr-time-sink-header">
+  <div>
+    <h2 class="panel-title" data-role="title"></h2>
+    <p class="panel-kicker" data-role="subtitle"></p>
+  </div>
+  <div class="rr-time-sink-controls" aria-label="Time sink controls">
+    <label class="control-field">
+      <span>Y min</span>
+      <input data-role="y-min" type="number" step="any" value="-1">
+    </label>
+    <label class="control-field">
+      <span>Y max</span>
+      <input data-role="y-max" type="number" step="any" value="1">
+    </label>
+    <button data-role="y-apply" type="button">Apply</button>
+    <button data-role="y-zoom-in" type="button">Zoom In</button>
+    <button data-role="y-zoom-out" type="button">Zoom Out</button>
+    <button data-role="y-auto" type="button">Autoscale On</button>
+    <button data-role="pause" type="button">Pause</button>
+  </div>
+</div>
+<div class="panel-body">
+  <canvas class="rr-time-sink-canvas" data-role="canvas"></canvas>
+</div>
+"#;
 
-use rustradio::Float;
-use rustradio_ui::TaggedVec;
-
-const ID_GRAPH_CANVAS: &str = "float-graph";
-const ID_GRAPH_Y_MIN: &str = "graph-y-min";
-const ID_GRAPH_Y_MAX: &str = "graph-y-max";
-const ID_GRAPH_Y_APPLY: &str = "graph-y-apply";
-const ID_GRAPH_Y_ZOOM_IN: &str = "graph-y-zoom-in";
-const ID_GRAPH_Y_ZOOM_OUT: &str = "graph-y-zoom-out";
-const ID_GRAPH_Y_AUTO: &str = "graph-y-auto";
-
-// TODO: make this settable.
-const MAX_GRAPH_POINTS: usize = 10_000;
+const DEFAULT_MAX_GRAPH_POINTS: usize = 10_000;
 const AXIS_MARGIN_LEFT: f64 = 56.0;
 const AXIS_MARGIN_RIGHT: f64 = 12.0;
 const AXIS_MARGIN_TOP: f64 = 12.0;
 const AXIS_MARGIN_BOTTOM: f64 = 30.0;
 const AXIS_TICK_COUNT: usize = 6;
 
-thread_local! {
-    static GRAPH_STATE: RefCell<Option<GraphState>> = const { RefCell::new(None) };
+#[derive(Debug, Clone)]
+pub(crate) struct TimeSinkOptions {
+    pub title: String,
+    pub subtitle: String,
+    pub y_label: String,
+    pub sample_rate: f64,
+    pub max_points: usize,
 }
 
-/// TODO: this is wrong. The series should be aligned, not treated separately.
+impl Default for TimeSinkOptions {
+    /// Build a generic time sink configuration for callers that only need a
+    /// mount point and sample updates.
+    fn default() -> Self {
+        Self {
+            title: "Time Sink".into(),
+            subtitle: "Float stream amplitude over time".into(),
+            y_label: "Amplitude".into(),
+            sample_rate: 1.0,
+            max_points: DEFAULT_MAX_GRAPH_POINTS,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct TimeSink {
+    inner: Rc<RefCell<Inner>>,
+}
+
+impl TimeSink {
+    /// Find a mount element by ID and replace its contents with a time sink.
+    pub(crate) fn mount_by_id(id: &str, options: TimeSinkOptions) -> Result<Self, JsValue> {
+        let root = get_element_by_id(id)?;
+        Self::mount(&root, options)
+    }
+
+    /// Mount a self-contained time sink into an existing DOM element.
+    pub(crate) fn mount(root: &Element, options: TimeSinkOptions) -> Result<Self, JsValue> {
+        root.set_inner_html(TIME_SINK_HTML);
+
+        role::<Element>(root, "title")?.set_text_content(Some(&options.title));
+        role::<Element>(root, "subtitle")?.set_text_content(Some(&options.subtitle));
+
+        let canvas = role::<HtmlCanvasElement>(root, "canvas")?;
+        let ctx = canvas
+            .get_context("2d")?
+            .ok_or(JsValue::from_str("no 2d context"))?
+            .dyn_into::<CanvasRenderingContext2d>()?;
+
+        let inner = Rc::new(RefCell::new(Inner {
+            canvas,
+            ctx,
+            y_min_input: role::<HtmlInputElement>(root, "y-min")?,
+            y_max_input: role::<HtmlInputElement>(root, "y-max")?,
+            y_apply_button: role::<HtmlButtonElement>(root, "y-apply")?,
+            y_zoom_in_button: role::<HtmlButtonElement>(root, "y-zoom-in")?,
+            y_zoom_out_button: role::<HtmlButtonElement>(root, "y-zoom-out")?,
+            y_auto_button: role::<HtmlButtonElement>(root, "y-auto")?,
+            pause_button: role::<HtmlButtonElement>(root, "pause")?,
+            series: Vec::new(),
+            y_min: -1.0,
+            y_max: 1.0,
+            auto_scale: true,
+            paused: false,
+            sample_rate: options.sample_rate,
+            max_points: options.max_points.max(1),
+            y_label: options.y_label,
+            sync_inputs: true,
+            callbacks: Vec::new(),
+        }));
+
+        let sink = Self { inner };
+        sink.install_handlers()?;
+        sink.draw()?;
+        Ok(sink)
+    }
+
+    /// Add new tagged float streams to the sink and redraw unless paused.
+    #[allow(clippy::needless_pass_by_value)]
+    pub(crate) fn update(&self, streams: Vec<TaggedVec<Float>>) -> Result<(), JsValue> {
+        let mut inner = self.inner.borrow_mut();
+        inner.append_streams(&streams);
+        if inner.paused {
+            inner.sync_controls()
+        } else {
+            inner.draw()
+        }
+    }
+
+    /// Set the sample rate used to convert sample indexes into seconds.
+    pub(crate) fn set_sample_rate(&self, sample_rate: f64) -> Result<(), JsValue> {
+        let mut inner = self.inner.borrow_mut();
+        inner.set_sample_rate(sample_rate);
+        if inner.paused {
+            inner.sync_controls()
+        } else {
+            inner.draw()
+        }
+    }
+
+    /// Pause or resume drawing through the API, matching the UI button state.
+    #[allow(dead_code)]
+    pub(crate) fn set_paused(&self, paused: bool) -> Result<(), JsValue> {
+        let mut inner = self.inner.borrow_mut();
+        inner.paused = paused;
+        if inner.paused {
+            inner.sync_controls()
+        } else {
+            inner.draw()
+        }
+    }
+
+    /// Return whether incoming updates are currently buffered without redraw.
+    #[allow(dead_code)]
+    pub(crate) fn paused(&self) -> bool {
+        self.inner.borrow().paused
+    }
+
+    /// Drop all buffered series data and redraw the empty sink.
+    #[allow(dead_code)]
+    pub(crate) fn clear(&self) -> Result<(), JsValue> {
+        let mut inner = self.inner.borrow_mut();
+        inner.series.clear();
+        inner.draw()
+    }
+
+    /// Redraw the current sink state.
+    fn draw(&self) -> Result<(), JsValue> {
+        self.inner.borrow_mut().draw()
+    }
+
+    /// Install all generated control callbacks for this sink instance.
+    fn install_handlers(&self) -> Result<(), JsValue> {
+        let inner = self.inner.clone();
+        let button = inner.borrow().y_apply_button.clone();
+        install_button_handler(&inner, &button, |inner| {
+            let y_min = Inner::parse_y_input(&inner.y_min_input, "Y min")?;
+            let y_max = Inner::parse_y_input(&inner.y_max_input, "Y max")?;
+            if !y_min.is_finite() || !y_max.is_finite() || y_min >= y_max {
+                return Err(JsValue::from_str("invalid Y min/max range"));
+            }
+            inner.y_min = y_min;
+            inner.y_max = y_max;
+            inner.auto_scale = false;
+            inner.sync_inputs = false;
+            inner.draw()
+        })?;
+
+        let inner = self.inner.clone();
+        let button = inner.borrow().y_zoom_in_button.clone();
+        install_button_handler(&inner, &button, |inner| inner.zoom_y(0.8))?;
+
+        let inner = self.inner.clone();
+        let button = inner.borrow().y_zoom_out_button.clone();
+        install_button_handler(&inner, &button, |inner| inner.zoom_y(1.25))?;
+
+        let inner = self.inner.clone();
+        let button = inner.borrow().y_auto_button.clone();
+        install_button_handler(&inner, &button, |inner| {
+            inner.auto_scale = !inner.auto_scale;
+            inner.sync_inputs = true;
+            inner.draw()
+        })?;
+
+        let inner = self.inner.clone();
+        let button = inner.borrow().pause_button.clone();
+        install_button_handler(&inner, &button, |inner| {
+            inner.paused = !inner.paused;
+            if inner.paused {
+                inner.sync_controls()
+            } else {
+                inner.draw()
+            }
+        })?;
+
+        let inner = self.inner.clone();
+        let handler = Closure::<dyn FnMut(Event)>::new(move |_event: Event| {
+            if let Err(err) = inner.borrow_mut().draw() {
+                log::error!("time sink resize failed: {err:?}");
+            }
+        });
+        let window = web_sys::window().ok_or(JsValue::from_str("no window"))?;
+        window.add_event_listener_with_callback("resize", handler.as_ref().unchecked_ref())?;
+        self.inner.borrow_mut().callbacks.push(handler);
+
+        Ok(())
+    }
+}
+
 struct GraphSeries {
+    // The absolute stream pos of the first value.
     start_index: u64,
     samples: VecDeque<f32>,
+
+    // Tag positions are in absolute stream value.
+    tags: Vec<Tag>,
 }
 
 impl GraphSeries {
-    fn append_samples(&mut self, samples: &[f32]) {
-        self.samples.extend(samples.iter().copied());
-        while self.samples.len() > MAX_GRAPH_POINTS {
+    /// Create one buffered plotted series with room for the first update.
+    fn new(capacity: usize) -> Self {
+        Self {
+            start_index: 0,
+            samples: VecDeque::with_capacity(capacity),
+            tags: Vec::new(),
+        }
+    }
+
+    /// Append one tagged stream and trim old samples beyond the retention cap.
+    fn append_stream(&mut self, stream: &TaggedVec<Float>, max_points: usize) {
+        self.tags.extend(stream.tags.iter().map(|t| {
+            Tag::new(
+                ((t.pos() as u64) + self.start_index + (self.samples.len() as u64)) as _,
+                t.key(),
+                t.val().clone(),
+            )
+        }));
+        self.samples.extend(stream.data.iter().copied());
+        while self.samples.len() > max_points {
             self.samples.pop_front();
             self.start_index = self.start_index.saturating_add(1);
         }
     }
 }
 
-struct GraphState {
+struct Inner {
+    canvas: HtmlCanvasElement,
+    ctx: CanvasRenderingContext2d,
+    y_min_input: HtmlInputElement,
+    y_max_input: HtmlInputElement,
+    y_apply_button: HtmlButtonElement,
+    y_zoom_in_button: HtmlButtonElement,
+    y_zoom_out_button: HtmlButtonElement,
+    y_auto_button: HtmlButtonElement,
+    pause_button: HtmlButtonElement,
     series: Vec<GraphSeries>,
     y_min: f32,
     y_max: f32,
     auto_scale: bool,
+    paused: bool,
     sample_rate: f64,
+    max_points: usize,
+    y_label: String,
     sync_inputs: bool,
+    callbacks: Vec<Closure<dyn FnMut(Event)>>,
 }
 
-impl GraphState {
-    fn new() -> Self {
-        Self {
-            series: Vec::new(),
-            y_min: -1.0,
-            y_max: 1.0,
-            auto_scale: true,
-            sample_rate: 1.0,
-            sync_inputs: true,
-        }
-    }
-
+impl Inner {
+    /// Store a positive finite sample rate, ignoring invalid values.
     fn set_sample_rate(&mut self, sample_rate: f64) {
         if sample_rate.is_finite() && sample_rate > 0.0 {
             self.sample_rate = sample_rate;
         }
     }
 
+    /// Append all streams from one update, creating series as needed.
     fn append_streams(&mut self, streams: &[TaggedVec<Float>]) {
         for (idx, stream) in streams.iter().enumerate() {
             if self.series.len() <= idx {
-                self.series.push(GraphSeries {
-                    start_index: 0,
-                    samples: VecDeque::with_capacity(stream.data.len()),
-                });
+                self.series
+                    .push(GraphSeries::new(stream.data.len().min(self.max_points)));
             }
-            self.series[idx].append_samples(stream.data.as_ref());
+            self.series[idx].append_stream(stream, self.max_points);
         }
     }
-}
 
-fn with_graph_state<T>(f: impl FnOnce(&mut GraphState) -> T) -> T {
-    GRAPH_STATE.with(|cell| {
-        let mut opt = cell.borrow_mut();
-        let state = opt.get_or_insert_with(GraphState::new);
-        f(state)
-    })
-}
-
-pub(crate) fn setup_graph_ui() -> Result<(), JsValue> {
-    {
-        let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
-            let y_min = parse_f32_input(ID_GRAPH_Y_MIN)?;
-            let y_max = parse_f32_input(ID_GRAPH_Y_MAX)?;
-            if !y_min.is_finite() || !y_max.is_finite() || y_min >= y_max {
-                return Err(JsValue::from_str("invalid Y min/max range"));
-            }
-            with_graph_state(|state| {
-                state.y_min = y_min;
-                state.y_max = y_max;
-                state.auto_scale = false;
-                state.sync_inputs = false;
-            });
-            draw_graph()?;
-            Ok(())
-        });
-        let btn = get_element(ID_GRAPH_Y_APPLY)?.dyn_into::<HtmlButtonElement>()?;
-        btn.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())?;
-        handler.forget();
-    }
-
-    {
-        let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
-            zoom_y(0.8)?;
-            Ok(())
-        });
-        let btn = get_element(ID_GRAPH_Y_ZOOM_IN)?.dyn_into::<HtmlButtonElement>()?;
-        btn.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())?;
-        handler.forget();
-    }
-
-    {
-        let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
-            zoom_y(1.25)?;
-            Ok(())
-        });
-        let btn = get_element(ID_GRAPH_Y_ZOOM_OUT)?.dyn_into::<HtmlButtonElement>()?;
-        btn.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())?;
-        handler.forget();
-    }
-
-    {
-        let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
-            with_graph_state(|state| {
-                state.auto_scale = true;
-                state.sync_inputs = true;
-            });
-            draw_graph()?;
-            Ok(())
-        });
-        let btn = get_element(ID_GRAPH_Y_AUTO)?.dyn_into::<HtmlButtonElement>()?;
-        btn.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())?;
-        handler.forget();
-    }
-
-    {
-        let handler = Closure::<dyn FnMut(Event)>::new(move |_e: Event| {
-            let _ = draw_graph();
-        });
+    /// Draw the full canvas, including axes, controls, autoscale, and traces.
+    fn draw(&mut self) -> Result<(), JsValue> {
+        let (width, height) = resize_canvas_to_display_size(&self.canvas)?;
         let window = web_sys::window().ok_or(JsValue::from_str("no window"))?;
-        window.add_event_listener_with_callback("resize", handler.as_ref().unchecked_ref())?;
-        handler.forget();
+        let is_dark = window
+            .match_media("(prefers-color-scheme: dark)")?
+            .is_some_and(|m| m.matches());
+        let bg = if is_dark { "#0b0b0b" } else { "#ffffff" };
+        let axis = if is_dark { "#666" } else { "#888" };
+        let text = if is_dark { "#ddd" } else { "#222" };
+
+        self.ctx.set_fill_style_str(bg);
+        self.ctx.fill_rect(0.0, 0.0, width, height);
+        self.ctx.set_stroke_style_str(axis);
+        self.ctx
+            .stroke_rect(0.5, 0.5, (width - 1.0).max(0.0), (height - 1.0).max(0.0));
+
+        if self.auto_scale {
+            if let Some((min, max)) = self.data_range() {
+                debug!("Data range: {min} {max}");
+                self.y_min = min;
+                self.y_max = max;
+            }
+            self.sync_inputs = true;
+        }
+        self.sync_controls()?;
+
+        let mut y_min = self.y_min;
+        let mut y_max = self.y_max;
+        if !y_min.is_finite() || !y_max.is_finite() || y_min >= y_max {
+            y_min = -1.0;
+            y_max = 1.0;
+        }
+        if (y_max - y_min).abs() < f32::EPSILON {
+            y_min -= 1.0;
+            y_max += 1.0;
+        }
+
+        let Some((x_min, x_max)) = self.time_range() else {
+            self.ctx.set_fill_style_str(text);
+            self.ctx.set_font("12px sans-serif");
+            self.ctx
+                .fill_text("Waiting for float data...", 12.0, 20.0)?;
+            return Ok(());
+        };
+
+        let plot_left = AXIS_MARGIN_LEFT.min((width - 1.0).max(0.0));
+        let plot_top = AXIS_MARGIN_TOP.min((height - 1.0).max(0.0));
+        let plot_width = (width - AXIS_MARGIN_LEFT - AXIS_MARGIN_RIGHT).max(1.0);
+        let plot_height = (height - AXIS_MARGIN_TOP - AXIS_MARGIN_BOTTOM).max(1.0);
+
+        draw_axes(
+            &self.ctx,
+            axis,
+            text,
+            plot_left,
+            plot_top,
+            plot_width,
+            plot_height,
+            x_min,
+            x_max,
+            f64::from(y_min),
+            f64::from(y_max),
+            &self.y_label,
+        )?;
+
+        let x_range = (x_max - x_min).max(1e-9);
+        let y_range = f64::from(y_max - y_min);
+        let colors = ["#2b8cbe", "#31a354", "#756bb1", "#e6550d"];
+        let samples_per_bucket = (x_range * self.sample_rate / plot_width.max(1.0))
+            .ceil()
+            .max(1.0) as u64;
+
+        for (idx, series) in self.series.iter().enumerate() {
+            draw_series(
+                &self.ctx,
+                series,
+                colors[idx % colors.len()],
+                plot_left,
+                plot_top,
+                plot_width,
+                plot_height,
+                x_min,
+                x_range,
+                f64::from(y_min),
+                y_range,
+                self.sample_rate,
+                samples_per_bucket,
+            );
+        }
+        Ok(())
     }
 
-    with_graph_state(|state| state.sync_inputs = true);
-    draw_graph()?;
+    /// Compute the visible sample range used by autoscale.
+    fn data_range(&self) -> Option<(f32, f32)> {
+        let mut min = f32::INFINITY;
+        let mut max = f32::NEG_INFINITY;
+        for series in &self.series {
+            for &sample in &series.samples {
+                if sample < min {
+                    min = sample;
+                }
+                if sample > max {
+                    max = sample;
+                }
+            }
+        }
+        if min.is_finite() && max.is_finite() {
+            Some((min, max))
+        } else {
+            None
+        }
+    }
+
+    /// Compute the earliest and latest buffered sample time in seconds.
+    fn time_range(&self) -> Option<(f64, f64)> {
+        let mut min_idx: Option<u64> = None;
+        let mut max_idx: Option<u64> = None;
+        for series in &self.series {
+            let len = series.samples.len() as u64;
+            if len == 0 {
+                continue;
+            }
+            let series_min = series.start_index;
+            let series_max = series.start_index + len - 1;
+            min_idx = Some(min_idx.map_or(series_min, |v| v.min(series_min)));
+            max_idx = Some(max_idx.map_or(series_max, |v| v.max(series_max)));
+        }
+        let sample_rate = if self.sample_rate > 0.0 {
+            self.sample_rate
+        } else {
+            1.0
+        };
+        match (min_idx, max_idx) {
+            (Some(min_idx), Some(max_idx)) => {
+                let min_t = min_idx as f64 / sample_rate;
+                let max_t = max_idx as f64 / sample_rate;
+                Some((min_t, max_t))
+            }
+            _ => None,
+        }
+    }
+
+    /// Apply a multiplicative zoom to the Y axis around its current center.
+    fn zoom_y(&mut self, factor: f32) -> Result<(), JsValue> {
+        let (mut y_min, mut y_max) = if self.auto_scale {
+            self.data_range().unwrap_or((self.y_min, self.y_max))
+        } else {
+            (self.y_min, self.y_max)
+        };
+        if !y_min.is_finite() || !y_max.is_finite() || y_min >= y_max {
+            y_min = -1.0;
+            y_max = 1.0;
+        }
+        let center = f32::midpoint(y_min, y_max);
+        let half = ((y_max - y_min) / 2.0 * factor).max(1e-6);
+        self.y_min = center - half;
+        self.y_max = center + half;
+        self.auto_scale = false;
+        self.sync_inputs = true;
+        self.draw()
+    }
+
+    /// Mirror internal pause/autoscale/Y-range state into generated controls.
+    fn sync_controls(&mut self) -> Result<(), JsValue> {
+        if self.sync_inputs {
+            self.y_min_input.set_value(&format!("{}", self.y_min));
+            self.y_max_input.set_value(&format!("{}", self.y_max));
+            self.sync_inputs = false;
+        }
+
+        self.pause_button
+            .set_text_content(Some(if self.paused { "Resume" } else { "Pause" }));
+        self.pause_button
+            .set_attribute("aria-pressed", if self.paused { "true" } else { "false" })?;
+
+        self.y_auto_button
+            .set_text_content(Some(if self.auto_scale {
+                "Autoscale On"
+            } else {
+                "Autoscale Off"
+            }));
+        self.y_auto_button.set_attribute(
+            "aria-pressed",
+            if self.auto_scale { "true" } else { "false" },
+        )?;
+
+        Ok(())
+    }
+
+    /// Parse one numeric Y-axis input with a caller-friendly error label.
+    fn parse_y_input(input: &HtmlInputElement, label: &str) -> Result<f32, JsValue> {
+        input
+            .value()
+            .parse::<f32>()
+            .map_err(|e| JsValue::from_str(&format!("parsing {label}: {e}")))
+    }
+}
+
+/// Register one button callback and keep the closure alive with the sink.
+fn install_button_handler(
+    inner: &Rc<RefCell<Inner>>,
+    button: &HtmlButtonElement,
+    mut handler: impl FnMut(&mut Inner) -> Result<(), JsValue> + 'static,
+) -> Result<(), JsValue> {
+    let state = inner.clone();
+    let closure = Closure::<dyn FnMut(Event)>::new(move |_event: Event| {
+        if let Err(err) = handler(&mut state.borrow_mut()) {
+            log::error!("time sink control failed: {err:?}");
+        }
+    });
+    button.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())?;
+    inner.borrow_mut().callbacks.push(closure);
     Ok(())
 }
 
-fn data_range(state: &GraphState) -> Option<(f32, f32)> {
-    let mut min = f32::INFINITY;
-    let mut max = f32::NEG_INFINITY;
-    for series in &state.series {
-        for &sample in &series.samples {
-            if sample < min {
-                min = sample;
-            }
-            if sample > max {
-                max = sample;
-            }
-        }
-    }
-    if min.is_finite() && max.is_finite() {
-        Some((min, max))
-    } else {
-        None
-    }
+/// Look up a mount element in the current browser document.
+fn get_element_by_id(id: &str) -> Result<Element, JsValue> {
+    let window = web_sys::window().ok_or(JsValue::from_str("no window"))?;
+    let document = window
+        .document()
+        .ok_or_else(|| JsValue::from_str("no document"))?;
+
+    document
+        .get_element_by_id(id)
+        .ok_or(JsValue::from_str(&format!(
+            "can't find element with id {id}"
+        )))
 }
 
-fn time_range(state: &GraphState) -> Option<(f64, f64)> {
-    let mut min_idx: Option<u64> = None;
-    let mut max_idx: Option<u64> = None;
-    for series in &state.series {
-        let len = series.samples.len() as u64;
-        if len == 0 {
-            continue;
-        }
-        let series_min = series.start_index;
-        let series_max = series.start_index + len - 1;
-        min_idx = Some(min_idx.map_or(series_min, |v| v.min(series_min)));
-        max_idx = Some(max_idx.map_or(series_max, |v| v.max(series_max)));
-    }
-    let sample_rate = if state.sample_rate > 0.0 {
-        state.sample_rate
-    } else {
-        1.0
-    };
-    match (min_idx, max_idx) {
-        (Some(min_idx), Some(max_idx)) => {
-            let min_t = min_idx as f64 / sample_rate;
-            let max_t = max_idx as f64 / sample_rate;
-            Some((min_t, max_t))
-        }
-        _ => None,
-    }
+/// Find a generated child element by its component-local data role.
+fn role<T: JsCast>(root: &Element, role: &str) -> Result<T, JsValue> {
+    root.query_selector(&format!("[data-role=\"{role}\"]"))?
+        .ok_or(JsValue::from_str(&format!(
+            "missing time sink element role {role}"
+        )))?
+        .dyn_into::<T>()
+        .map_err(|_| JsValue::from_str(&format!("time sink role {role} has wrong element type")))
 }
 
+/// Match the backing canvas resolution to CSS size and device pixel ratio.
 fn resize_canvas_to_display_size(canvas: &HtmlCanvasElement) -> Result<(f64, f64), JsValue> {
     let window = web_sys::window().ok_or(JsValue::from_str("no window"))?;
     let dpr = window.device_pixel_ratio();
@@ -238,112 +568,8 @@ fn resize_canvas_to_display_size(canvas: &HtmlCanvasElement) -> Result<(f64, f64
     Ok((f64::from(canvas.width()), f64::from(canvas.height())))
 }
 
-fn draw_graph() -> Result<(), JsValue> {
-    let canvas = get_element(ID_GRAPH_CANVAS)?.dyn_into::<HtmlCanvasElement>()?;
-    let (width, height) = resize_canvas_to_display_size(&canvas)?;
-    let ctx = canvas
-        .get_context("2d")?
-        .ok_or(JsValue::from_str("no 2d context"))?
-        .dyn_into::<CanvasRenderingContext2d>()?;
-
-    let window = web_sys::window().ok_or(JsValue::from_str("no window"))?;
-    let is_dark = window
-        .match_media("(prefers-color-scheme: dark)")?
-        .is_some_and(|m| m.matches());
-    let bg = if is_dark { "#0b0b0b" } else { "#ffffff" };
-    let axis = if is_dark { "#666" } else { "#888" };
-    let text = if is_dark { "#ddd" } else { "#222" };
-
-    ctx.set_fill_style_str(bg);
-    ctx.fill_rect(0.0, 0.0, width, height);
-    ctx.set_stroke_style_str(axis);
-    ctx.stroke_rect(0.5, 0.5, (width - 1.0).max(0.0), (height - 1.0).max(0.0));
-
-    GRAPH_STATE.with(|cell| -> Result<(), JsValue> {
-        let mut opt = cell.borrow_mut();
-        let state = opt.get_or_insert_with(GraphState::new);
-        if state.auto_scale {
-            if let Some((min, max)) = data_range(state) {
-                debug!("Data range: {min} {max}");
-                state.y_min = min;
-                state.y_max = max;
-            }
-            state.sync_inputs = true;
-        }
-
-        if state.sync_inputs {
-            set_y_inputs(state.y_min, state.y_max)?;
-            state.sync_inputs = false;
-        }
-
-        let mut y_min = state.y_min;
-        let mut y_max = state.y_max;
-        if !y_min.is_finite() || !y_max.is_finite() || y_min >= y_max {
-            y_min = -1.0;
-            y_max = 1.0;
-        }
-        if (y_max - y_min).abs() < f32::EPSILON {
-            y_min -= 1.0;
-            y_max += 1.0;
-        }
-
-        let Some((x_min, x_max)) = time_range(state) else {
-            ctx.set_fill_style_str(text);
-            ctx.set_font("12px sans-serif");
-            ctx.fill_text("Waiting for float data...", 12.0, 20.0)?;
-            return Ok(());
-        };
-
-        let plot_left = AXIS_MARGIN_LEFT.min((width - 1.0).max(0.0));
-        let plot_top = AXIS_MARGIN_TOP.min((height - 1.0).max(0.0));
-        let plot_width = (width - AXIS_MARGIN_LEFT - AXIS_MARGIN_RIGHT).max(1.0);
-        let plot_height = (height - AXIS_MARGIN_TOP - AXIS_MARGIN_BOTTOM).max(1.0);
-
-        draw_axes(
-            &ctx,
-            axis,
-            text,
-            plot_left,
-            plot_top,
-            plot_width,
-            plot_height,
-            x_min,
-            x_max,
-            f64::from(y_min),
-            f64::from(y_max),
-        )?;
-
-        let x_range = (x_max - x_min).max(1e-9);
-        let y_range = f64::from(y_max - y_min);
-        let colors = ["#2b8cbe", "#31a354", "#756bb1", "#e6550d"];
-        let samples_per_bucket = (x_range * state.sample_rate / plot_width.max(1.0))
-            .ceil()
-            .max(1.0) as u64;
-
-        for (idx, series) in state.series.iter().enumerate() {
-            draw_series(
-                &ctx,
-                series,
-                colors[idx % colors.len()],
-                plot_left,
-                plot_top,
-                plot_width,
-                plot_height,
-                x_min,
-                x_range,
-                f64::from(y_min),
-                y_range,
-                state.sample_rate,
-                samples_per_bucket,
-            );
-        }
-        Ok(())
-    })?;
-
-    Ok(())
-}
-
 #[allow(clippy::too_many_arguments)]
+/// Draw one series as connected samples or bucketed aggregate points.
 fn draw_series(
     ctx: &CanvasRenderingContext2d,
     series: &GraphSeries,
@@ -461,6 +687,7 @@ fn draw_series(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Add one downsampled point representing the vertical center of a bucket.
 fn push_bucket_point(
     points: &mut Vec<(f64, f64)>,
     first_idx: u64,
@@ -484,6 +711,7 @@ fn push_bucket_point(
     points.push((x, f64::midpoint(y_min_px, y_max_px)));
 }
 
+/// Map a sample index to an X pixel coordinate.
 fn graph_x(
     sample_idx: u64,
     sample_rate: f64,
@@ -496,11 +724,13 @@ fn graph_x(
     plot_left + ((t - x_min) / x_range) * plot_width
 }
 
+/// Map a sample value to a Y pixel coordinate.
 fn graph_y(sample: f64, plot_top: f64, plot_height: f64, y_min: f64, y_range: f64) -> f64 {
     plot_top + plot_height - ((sample - y_min) / y_range) * plot_height
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Draw plot axes, tick labels, and axis labels.
 fn draw_axes(
     ctx: &CanvasRenderingContext2d,
     axis: &str,
@@ -513,6 +743,7 @@ fn draw_axes(
     x_max: f64,
     y_min: f64,
     y_max: f64,
+    y_label: &str,
 ) -> Result<(), JsValue> {
     let plot_right = plot_left + plot_width;
     let plot_bottom = plot_top + plot_height;
@@ -563,12 +794,13 @@ fn draw_axes(
     ctx.rotate(-std::f64::consts::FRAC_PI_2)?;
     ctx.set_text_align("center");
     ctx.set_text_baseline("top");
-    ctx.fill_text("Amplitude", 0.0, 0.0)?;
+    ctx.fill_text(y_label, 0.0, 0.0)?;
     ctx.restore();
 
     Ok(())
 }
 
+/// Generate human-friendly tick values for an axis range.
 fn nice_ticks(min: f64, max: f64, count: usize) -> Vec<f64> {
     if !min.is_finite() || !max.is_finite() || count < 2 {
         return Vec::new();
@@ -589,6 +821,7 @@ fn nice_ticks(min: f64, max: f64, count: usize) -> Vec<f64> {
     ticks
 }
 
+/// Round an arbitrary tick interval to 1, 2, 5, or 10 times a power of ten.
 fn nice_step(raw_step: f64) -> f64 {
     if raw_step <= 0.0 {
         return 1.0;
@@ -608,6 +841,7 @@ fn nice_step(raw_step: f64) -> f64 {
     nice_scaled * base
 }
 
+/// Format an axis tick with precision based on its magnitude.
 fn format_tick(value: f64) -> String {
     let abs = value.abs();
     if abs >= 1000.0 {
@@ -621,52 +855,4 @@ fn format_tick(value: f64) -> String {
     } else {
         format!("{value:.4}")
     }
-}
-
-fn zoom_y(factor: f32) -> Result<(), JsValue> {
-    with_graph_state(|state| {
-        let (mut y_min, mut y_max) = if state.auto_scale {
-            data_range(state).unwrap_or((state.y_min, state.y_max))
-        } else {
-            (state.y_min, state.y_max)
-        };
-        if !y_min.is_finite() || !y_max.is_finite() || y_min >= y_max {
-            y_min = -1.0;
-            y_max = 1.0;
-        }
-        let center = f32::midpoint(y_min, y_max);
-        let half = ((y_max - y_min) / 2.0 * factor).max(1e-6);
-        state.y_min = center - half;
-        state.y_max = center + half;
-        state.auto_scale = false;
-        state.sync_inputs = true;
-    });
-    draw_graph()
-}
-fn set_y_inputs(y_min: f32, y_max: f32) -> Result<(), JsValue> {
-    get_element(ID_GRAPH_Y_MIN)?
-        .dyn_into::<HtmlInputElement>()?
-        .set_value(&format!("{y_min:}"));
-    get_element(ID_GRAPH_Y_MAX)?
-        .dyn_into::<HtmlInputElement>()?
-        .set_value(&format!("{y_max:}"));
-    Ok(())
-}
-
-fn parse_f32_input(id: &str) -> Result<f32, JsValue> {
-    get_element(id)?
-        .dyn_into::<HtmlInputElement>()?
-        .value()
-        .parse::<f32>()
-        .map_err(|e| JsValue::from_str(&format!("parsing {id}: {e}")))
-}
-
-#[allow(clippy::needless_pass_by_value)]
-pub(crate) fn update(streams: Vec<TaggedVec<Float>>) -> Result<(), JsValue> {
-    with_graph_state(|state| state.append_streams(&streams));
-    draw_graph()
-}
-
-pub(crate) fn set_sample_rate(samp_rate: f64) {
-    with_graph_state(|state| state.set_sample_rate(samp_rate));
 }

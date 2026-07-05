@@ -34,6 +34,7 @@ const ID_RTLSDR_FREQUENCY: &str = "input-rtlsdr-frequency";
 const ID_OFFSET: &str = "input-offset";
 const ID_RTLSDR_GAIN_AUTO: &str = "input-rtlsdr-gain-auto";
 const ID_RTLSDR_GAIN: &str = "input-rtlsdr-gain";
+const ID_TIME_SINK: &str = "time-sink";
 pub(crate) const ID_LOG_OUTPUT: &str = "log-output";
 const RTLSDR_MIN_GAIN_TENTHS_DB: i32 = -100;
 const RTLSDR_MAX_GAIN_TENTHS_DB: i32 = 500;
@@ -52,6 +53,7 @@ thread_local! {
     static PENDING_FILE_REQUESTS: RefCell<Vec<(String, usize)>> = const { RefCell::new(Vec::new()) };
     static INPUT_SOURCE: RefCell<InputSource> = const { RefCell::new(InputSource::None) };
     static WS_SOCKET: RefCell<Option<WebSocket>> = const { RefCell::new(None) };
+    static TIME_SINK: RefCell<Option<crate::time_sink::TimeSink>> = const { RefCell::new(None) };
 }
 
 async fn read_data(start: u64, size: u64) -> Result<Vec<u8>, JsValue> {
@@ -154,11 +156,24 @@ fn clear_input_source() {
     INPUT_SOURCE.with(|slot| *slot.borrow_mut() = InputSource::None);
 }
 
+/// Borrow the application-owned time sink handle from main-thread callbacks.
+fn with_time_sink<T>(
+    f: impl FnOnce(&crate::time_sink::TimeSink) -> Result<T, JsValue>,
+) -> Result<T, JsValue> {
+    TIME_SINK.with(|slot| {
+        let sink = slot.borrow();
+        let sink = sink
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("time sink has not been initialized"))?;
+        f(sink)
+    })
+}
+
 /// Handle message sent from the worker.
 async fn worker_msg(msg: WorkerToMain) -> Result<(), JsValue> {
     match msg {
         WorkerToMain::Floats(name, streams) => match name.as_str() {
-            "iq_mag" => crate::time_sink::update(streams)?,
+            "iq_mag" => with_time_sink(|sink| sink.update(streams))?,
             "iq_spectrum" => crate::spectrum_sink::update(streams)?,
             "audio_demod" => {
                 assert_eq!(streams.len(), 1);
@@ -463,7 +478,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
             let rtlsdr = get_element(ID_RTLSDR_FORMAT)?
                 .dyn_into::<web_sys::HtmlInputElement>()?
                 .checked();
-            crate::time_sink::set_sample_rate(crate::worker::VIZ_SAMPLE_RATE as f64);
+            with_time_sink(|sink| sink.set_sample_rate(crate::worker::VIZ_SAMPLE_RATE as f64))?;
             rustradio_ui::browser_audio::reset()?;
             post_message(&MainToWorker::Start(crate::Ax25Start {
                 samp_rate,
@@ -582,6 +597,20 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
     // Init the worker.
     start_worker::<crate::Ax25MainToWorker, crate::Ax25WorkerToMain, _, _>(worker_msg);
 
+    let time_sink = crate::time_sink::TimeSink::mount_by_id(
+        ID_TIME_SINK,
+        crate::time_sink::TimeSinkOptions {
+            title: "Signal Strength".into(),
+            subtitle: "Float stream amplitude over time".into(),
+            y_label: "Amplitude".into(),
+            sample_rate: crate::worker::VIZ_SAMPLE_RATE as f64,
+            ..Default::default()
+        },
+    )?;
+    TIME_SINK.with(|slot| {
+        *slot.borrow_mut() = Some(time_sink);
+    });
+
     // Show some bootup message.
     set_content(
         ID_RESULT,
@@ -598,7 +627,6 @@ WASM built by Rust version: {}",
         ),
     )?;
 
-    crate::time_sink::setup_graph_ui()?;
     crate::constellation_sink::setup_graph_ui()?;
     crate::spectrum_sink::setup_graph_ui()?;
 

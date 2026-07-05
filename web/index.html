@@ -130,31 +130,7 @@
 
     <section class="workspace" aria-label="Visualization workspace">
       <div class="visualization-grid">
-        <section class="panel visual-panel-wide" data-viz-slot="time-series">
-          <div class="panel-header">
-            <div>
-              <h2 class="panel-title">Signal Strength</h2>
-              <p class="panel-kicker">Float stream amplitude over time</p>
-            </div>
-            <div id="graph-controls" aria-label="Graph scale controls">
-              <div class="control-field">
-                <label for="graph-y-min">Y min</label>
-                <input id="graph-y-min" type="number" step="any" value="-1">
-              </div>
-              <div class="control-field">
-                <label for="graph-y-max">Y max</label>
-                <input id="graph-y-max" type="number" step="any" value="1">
-              </div>
-              <button id="graph-y-apply" type="button">Apply</button>
-              <button id="graph-y-zoom-in" type="button">Zoom In</button>
-              <button id="graph-y-zoom-out" type="button">Zoom Out</button>
-              <button id="graph-y-auto" type="button">Auto Scale</button>
-            </div>
-          </div>
-          <div class="panel-body">
-            <canvas id="float-graph"></canvas>
-          </div>
-        </section>
+        <section id="time-sink" class="panel visual-panel-wide" data-viz-slot="time-series"></section>
 
         <section class="panel visual-panel" data-viz-slot="constellation">
           <div class="panel-header">
