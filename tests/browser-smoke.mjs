@@ -458,31 +458,36 @@ async function runSmokeTest(appUrl, cdp) {
       const started = Date.now();
       const timeoutMs = 10000;
       function summary() {
-        const root = document.querySelector("#time-sink");
+        const timeRoot = document.querySelector("#time-sink");
+        const constellationRoot = document.querySelector("#constellation-sink");
         return {
           readyState: document.readyState,
           crossOriginIsolated: window.crossOriginIsolated,
-          rootHtml: root ? root.innerHTML.slice(0, 600) : null,
+          timeSinkHtml: timeRoot ? timeRoot.innerHTML.slice(0, 600) : null,
+          constellationSinkHtml: constellationRoot ? constellationRoot.innerHTML.slice(0, 600) : null,
           result: document.querySelector("#result")?.textContent || null,
         };
       }
       function check() {
-        const root = document.querySelector("#time-sink");
-        const pause = root?.querySelector("[data-role='pause']");
-        const auto = root?.querySelector("[data-role='y-auto']");
-        const canvas = root?.querySelector("canvas.rr-time-sink-canvas");
-        if (root && pause && auto && canvas) {
+        const timeRoot = document.querySelector("#time-sink");
+        const constellationRoot = document.querySelector("#constellation-sink");
+        const pause = timeRoot?.querySelector("[data-role='pause']");
+        const auto = timeRoot?.querySelector("[data-role='y-auto']");
+        const timeCanvas = timeRoot?.querySelector("canvas.rr-time-sink-canvas");
+        const constellationCanvas = constellationRoot?.querySelector("canvas.rr-constellation-sink-canvas");
+        if (timeRoot && pause && auto && timeCanvas && constellationRoot && constellationCanvas) {
           resolve({
             crossOriginIsolated: window.crossOriginIsolated,
             pauseText: pause.textContent,
             autoText: auto.textContent,
-            canvasClass: canvas.className,
+            timeCanvasClass: timeCanvas.className,
+            constellationCanvasClass: constellationCanvas.className,
             resultText: document.querySelector("#result")?.textContent || "",
           });
           return;
         }
         if (Date.now() - started > timeoutMs) {
-          reject(new Error("timed out waiting for generated time sink DOM: " + JSON.stringify(summary())));
+          reject(new Error("timed out waiting for generated visualization DOM: " + JSON.stringify(summary())));
           return;
         }
         setTimeout(check, 50);

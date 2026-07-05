@@ -35,6 +35,7 @@ const ID_OFFSET: &str = "input-offset";
 const ID_RTLSDR_GAIN_AUTO: &str = "input-rtlsdr-gain-auto";
 const ID_RTLSDR_GAIN: &str = "input-rtlsdr-gain";
 const ID_TIME_SINK: &str = "time-sink";
+const ID_CONSTELLATION_SINK: &str = "constellation-sink";
 pub(crate) const ID_LOG_OUTPUT: &str = "log-output";
 const RTLSDR_MIN_GAIN_TENTHS_DB: i32 = -100;
 const RTLSDR_MAX_GAIN_TENTHS_DB: i32 = 500;
@@ -54,6 +55,8 @@ thread_local! {
     static INPUT_SOURCE: RefCell<InputSource> = const { RefCell::new(InputSource::None) };
     static WS_SOCKET: RefCell<Option<WebSocket>> = const { RefCell::new(None) };
     static TIME_SINK: RefCell<Option<time_sink::TimeSink>> = const { RefCell::new(None) };
+    static CONSTELLATION_SINK: RefCell<Option<crate::constellation_sink::ConstellationSink>> =
+        const { RefCell::new(None) };
 }
 
 async fn read_data(start: u64, size: u64) -> Result<Vec<u8>, JsValue> {
@@ -169,6 +172,20 @@ fn with_time_sink<T>(
     })
 }
 
+/// Borrow the application-owned constellation sink handle from main-thread
+/// callbacks.
+fn with_constellation_sink<T>(
+    f: impl FnOnce(&crate::constellation_sink::ConstellationSink) -> rustradio::Result<T>,
+) -> rustradio::Result<T> {
+    CONSTELLATION_SINK.with(|slot| {
+        let sink = slot.borrow();
+        let sink = sink
+            .as_ref()
+            .ok_or_else(|| rustradio::Error::msg("constellation sink has not been initialized"))?;
+        f(sink)
+    })
+}
+
 /// Handle message sent from the worker.
 async fn worker_msg(msg: WorkerToMain) -> Result<(), JsValue> {
     match msg {
@@ -186,7 +203,7 @@ async fn worker_msg(msg: WorkerToMain) -> Result<(), JsValue> {
         }
         WorkerToMain::Complexes(name, streams) => {
             assert_eq!(name, "iq_constellation");
-            crate::constellation_sink::update(streams)?;
+            with_constellation_sink(|sink| sink.update(streams))?;
         }
         WorkerToMain::ApplicationSpecific(msg) => match msg {
             Ax25Messages::Decoded(x) => {
@@ -611,6 +628,18 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
         *slot.borrow_mut() = Some(time_sink);
     });
 
+    let constellation_sink = crate::constellation_sink::ConstellationSink::mount_by_id(
+        ID_CONSTELLATION_SINK,
+        crate::constellation_sink::ConstellationSinkOptions {
+            title: "Constellation".into(),
+            subtitle: "1 ksps I/Q sample plane".into(),
+            ..Default::default()
+        },
+    )?;
+    CONSTELLATION_SINK.with(|slot| {
+        *slot.borrow_mut() = Some(constellation_sink);
+    });
+
     // Show some bootup message.
     set_content(
         ID_RESULT,
@@ -627,7 +656,6 @@ WASM built by Rust version: {}",
         ),
     )?;
 
-    crate::constellation_sink::setup_graph_ui()?;
     crate::spectrum_sink::setup_graph_ui()?;
 
     Ok(())

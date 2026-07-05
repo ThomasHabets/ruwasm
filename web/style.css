@@ -374,7 +374,7 @@ h1 {
   background: var(--surface-muted);
 }
 
-#constellation-graph {
+.rr-constellation-sink-canvas {
   display: block;
   width: 100%;
   height: clamp(280px, 32vh, 380px);
@@ -515,6 +515,7 @@ h1 {
 
   #float-graph,
   .rr-time-sink-canvas,
+  .rr-constellation-sink-canvas,
   .plot-surface {
     min-height: 16rem;
     height: 16rem;
