@@ -55,6 +55,9 @@ debug = true
 #strip = false
 
 [patch.crates-io]
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3.0"
 #rtlsdr-pure = { path = "../rtlsdr-pure" }
 #cross_usb = { path = "../rtlsdr-pure/vendor/cross_usb" }
 #rustradio = { path = "../rustradio" }

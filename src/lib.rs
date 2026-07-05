@@ -150,3 +150,13 @@ pub fn add(a: i32, b: i32) -> String {
     info!("Hello world, adding {a} and {b}");
     format!("Add results: {}", a + b)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_correct() {
+        assert_eq!(add(3, 5), "Add results: 8");
+    }
+}
