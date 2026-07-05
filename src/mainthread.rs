@@ -15,7 +15,9 @@ use crate::js_performance_now;
 use crate::{Ax25Messages, MainToWorker, WorkerToMain};
 use rustradio_ui::TaggedVec;
 
-use rustradio_ui::mainthread::{post_message, send_message, start_worker, time_sink};
+use rustradio_ui::mainthread::{
+    constellation_sink, post_message, send_message, spectrum_sink, start_worker, time_sink,
+};
 
 const HTML_DISABLED: &str = "disabled";
 const ID_RESULT: &str = "result";
@@ -57,11 +59,11 @@ thread_local! {
     static INPUT_SOURCE: RefCell<InputSource> = const { RefCell::new(InputSource::None) };
     static WS_SOCKET: RefCell<Option<WebSocket>> = const { RefCell::new(None) };
     static TIME_SINK: RefCell<Option<time_sink::TimeSink>> = const { RefCell::new(None) };
-    static CONSTELLATION_SINK: RefCell<Option<crate::constellation_sink::ConstellationSink>> =
+    static CONSTELLATION_SINK: RefCell<Option<constellation_sink::ConstellationSink>> =
         const { RefCell::new(None) };
-    static SPECTRUM_SINK: RefCell<Option<crate::spectrum_sink::SpectrumSink>> =
+    static SPECTRUM_SINK: RefCell<Option<spectrum_sink::SpectrumSink>> =
         const { RefCell::new(None) };
-    static WATERFALL_SINK: RefCell<Option<crate::spectrum_sink::WaterfallSink>> =
+    static WATERFALL_SINK: RefCell<Option<spectrum_sink::WaterfallSink>> =
         const { RefCell::new(None) };
 }
 
@@ -181,7 +183,7 @@ fn with_time_sink<T>(
 /// Borrow the application-owned constellation sink handle from main-thread
 /// callbacks.
 fn with_constellation_sink<T>(
-    f: impl FnOnce(&crate::constellation_sink::ConstellationSink) -> rustradio::Result<T>,
+    f: impl FnOnce(&constellation_sink::ConstellationSink) -> rustradio::Result<T>,
 ) -> rustradio::Result<T> {
     CONSTELLATION_SINK.with(|slot| {
         let sink = slot.borrow();
@@ -195,7 +197,7 @@ fn with_constellation_sink<T>(
 /// Borrow the application-owned spectrum sink handle from main-thread
 /// callbacks.
 fn with_spectrum_sink<T>(
-    f: impl FnOnce(&crate::spectrum_sink::SpectrumSink) -> rustradio::Result<T>,
+    f: impl FnOnce(&spectrum_sink::SpectrumSink) -> rustradio::Result<T>,
 ) -> rustradio::Result<T> {
     SPECTRUM_SINK.with(|slot| {
         let sink = slot.borrow();
@@ -209,7 +211,7 @@ fn with_spectrum_sink<T>(
 /// Borrow the application-owned waterfall sink handle from main-thread
 /// callbacks.
 fn with_waterfall_sink<T>(
-    f: impl FnOnce(&crate::spectrum_sink::WaterfallSink) -> rustradio::Result<T>,
+    f: impl FnOnce(&spectrum_sink::WaterfallSink) -> rustradio::Result<T>,
 ) -> rustradio::Result<T> {
     WATERFALL_SINK.with(|slot| {
         let sink = slot.borrow();
@@ -665,9 +667,9 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
         *slot.borrow_mut() = Some(time_sink);
     });
 
-    let constellation_sink = crate::constellation_sink::ConstellationSink::mount_by_id(
+    let constellation_sink = constellation_sink::ConstellationSink::mount_by_id(
         ID_CONSTELLATION_SINK,
-        crate::constellation_sink::ConstellationSinkOptions {
+        constellation_sink::ConstellationSinkOptions {
             title: "Constellation".into(),
             subtitle: "1 ksps I/Q sample plane".into(),
             ..Default::default()
@@ -678,9 +680,9 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
     });
 
     let spectrum_sample_rate = crate::worker::IF_SAMPLE_RATE as f32;
-    let spectrum_sink = crate::spectrum_sink::SpectrumSink::mount_by_id(
+    let spectrum_sink = spectrum_sink::SpectrumSink::mount_by_id(
         ID_SPECTRUM_SINK,
-        crate::spectrum_sink::SpectrumSinkOptions {
+        spectrum_sink::SpectrumSinkOptions {
             title: "Spectrum".into(),
             subtitle: "FFT power frame".into(),
             sample_rate: spectrum_sample_rate,
@@ -690,9 +692,9 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
         *slot.borrow_mut() = Some(spectrum_sink);
     });
 
-    let waterfall_sink = crate::spectrum_sink::WaterfallSink::mount_by_id(
+    let waterfall_sink = spectrum_sink::WaterfallSink::mount_by_id(
         ID_WATERFALL_SINK,
-        crate::spectrum_sink::WaterfallSinkOptions {
+        spectrum_sink::WaterfallSinkOptions {
             title: "Waterfall".into(),
             subtitle: "FFT power history".into(),
             sample_rate: spectrum_sample_rate,

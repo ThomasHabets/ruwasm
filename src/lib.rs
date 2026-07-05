@@ -16,9 +16,7 @@ use wasm_bindgen::prelude::*;
 // <https://github.com/RReverser/wasm-bindgen-rayon>.
 pub use wasm_bindgen_rayon::init_thread_pool;
 
-mod constellation_sink;
 mod mainthread;
-mod spectrum_sink;
 mod wasm_graph;
 mod worker;
 
