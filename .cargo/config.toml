@@ -1,3 +1,6 @@
+[env]
+CHROMEDRIVER = { value = "tools/chromedriver", force = true }
+
 [unstable]
 build-std = ["panic_abort", "std"]
 
