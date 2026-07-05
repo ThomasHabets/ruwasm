@@ -28,7 +28,7 @@ type FloatPduSink = rustradio_ui::worker::FloatPduSink<crate::Ax25WorkerToMain>;
 // TODO: magic values.
 const SOURCE_CHANNEL_SIZE: usize = 10;
 const AUDIO_SAMPLE_RATE: usize = 44_100;
-const IF_SAMPLE_RATE: usize = 50_000;
+pub(crate) const IF_SAMPLE_RATE: usize = 50_000;
 pub(crate) const VIZ_SAMPLE_RATE: usize = 1_000;
 const SPECTRUM_SIZE: usize = 256;
 

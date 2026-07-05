@@ -36,6 +36,8 @@ const ID_RTLSDR_GAIN_AUTO: &str = "input-rtlsdr-gain-auto";
 const ID_RTLSDR_GAIN: &str = "input-rtlsdr-gain";
 const ID_TIME_SINK: &str = "time-sink";
 const ID_CONSTELLATION_SINK: &str = "constellation-sink";
+const ID_SPECTRUM_SINK: &str = "spectrum-sink";
+const ID_WATERFALL_SINK: &str = "waterfall-sink";
 pub(crate) const ID_LOG_OUTPUT: &str = "log-output";
 const RTLSDR_MIN_GAIN_TENTHS_DB: i32 = -100;
 const RTLSDR_MAX_GAIN_TENTHS_DB: i32 = 500;
@@ -56,6 +58,10 @@ thread_local! {
     static WS_SOCKET: RefCell<Option<WebSocket>> = const { RefCell::new(None) };
     static TIME_SINK: RefCell<Option<time_sink::TimeSink>> = const { RefCell::new(None) };
     static CONSTELLATION_SINK: RefCell<Option<crate::constellation_sink::ConstellationSink>> =
+        const { RefCell::new(None) };
+    static SPECTRUM_SINK: RefCell<Option<crate::spectrum_sink::SpectrumSink>> =
+        const { RefCell::new(None) };
+    static WATERFALL_SINK: RefCell<Option<crate::spectrum_sink::WaterfallSink>> =
         const { RefCell::new(None) };
 }
 
@@ -186,12 +192,43 @@ fn with_constellation_sink<T>(
     })
 }
 
+/// Borrow the application-owned spectrum sink handle from main-thread
+/// callbacks.
+fn with_spectrum_sink<T>(
+    f: impl FnOnce(&crate::spectrum_sink::SpectrumSink) -> rustradio::Result<T>,
+) -> rustradio::Result<T> {
+    SPECTRUM_SINK.with(|slot| {
+        let sink = slot.borrow();
+        let sink = sink
+            .as_ref()
+            .ok_or_else(|| rustradio::Error::msg("spectrum sink has not been initialized"))?;
+        f(sink)
+    })
+}
+
+/// Borrow the application-owned waterfall sink handle from main-thread
+/// callbacks.
+fn with_waterfall_sink<T>(
+    f: impl FnOnce(&crate::spectrum_sink::WaterfallSink) -> rustradio::Result<T>,
+) -> rustradio::Result<T> {
+    WATERFALL_SINK.with(|slot| {
+        let sink = slot.borrow();
+        let sink = sink
+            .as_ref()
+            .ok_or_else(|| rustradio::Error::msg("waterfall sink has not been initialized"))?;
+        f(sink)
+    })
+}
+
 /// Handle message sent from the worker.
 async fn worker_msg(msg: WorkerToMain) -> Result<(), JsValue> {
     match msg {
         WorkerToMain::Floats(name, streams) => match name.as_str() {
             "iq_mag" => with_time_sink(|sink| sink.update(streams))?,
-            "iq_spectrum" => crate::spectrum_sink::update(streams)?,
+            "iq_spectrum" => {
+                with_spectrum_sink(|sink| sink.update(&streams))?;
+                with_waterfall_sink(|sink| sink.update(&streams))?;
+            }
             "audio_demod" => {
                 assert_eq!(streams.len(), 1);
                 rustradio_ui::browser_audio::enqueue(streams[0].data.iter().copied())?;
@@ -640,6 +677,32 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
         *slot.borrow_mut() = Some(constellation_sink);
     });
 
+    let spectrum_sample_rate = crate::worker::IF_SAMPLE_RATE as f32;
+    let spectrum_sink = crate::spectrum_sink::SpectrumSink::mount_by_id(
+        ID_SPECTRUM_SINK,
+        crate::spectrum_sink::SpectrumSinkOptions {
+            title: "Spectrum".into(),
+            subtitle: "FFT power frame".into(),
+            sample_rate: spectrum_sample_rate,
+        },
+    )?;
+    SPECTRUM_SINK.with(|slot| {
+        *slot.borrow_mut() = Some(spectrum_sink);
+    });
+
+    let waterfall_sink = crate::spectrum_sink::WaterfallSink::mount_by_id(
+        ID_WATERFALL_SINK,
+        crate::spectrum_sink::WaterfallSinkOptions {
+            title: "Waterfall".into(),
+            subtitle: "FFT power history".into(),
+            sample_rate: spectrum_sample_rate,
+            ..Default::default()
+        },
+    )?;
+    WATERFALL_SINK.with(|slot| {
+        *slot.borrow_mut() = Some(waterfall_sink);
+    });
+
     // Show some bootup message.
     set_content(
         ID_RESULT,
@@ -655,8 +718,6 @@ WASM built by Rust version: {}",
             crate::rustc_version()
         ),
     )?;
-
-    crate::spectrum_sink::setup_graph_ui()?;
 
     Ok(())
 }

@@ -460,28 +460,43 @@ async function runSmokeTest(appUrl, cdp) {
       function summary() {
         const timeRoot = document.querySelector("#time-sink");
         const constellationRoot = document.querySelector("#constellation-sink");
+        const spectrumRoot = document.querySelector("#spectrum-sink");
+        const waterfallRoot = document.querySelector("#waterfall-sink");
         return {
           readyState: document.readyState,
           crossOriginIsolated: window.crossOriginIsolated,
           timeSinkHtml: timeRoot ? timeRoot.innerHTML.slice(0, 600) : null,
           constellationSinkHtml: constellationRoot ? constellationRoot.innerHTML.slice(0, 600) : null,
+          spectrumSinkHtml: spectrumRoot ? spectrumRoot.innerHTML.slice(0, 600) : null,
+          waterfallSinkHtml: waterfallRoot ? waterfallRoot.innerHTML.slice(0, 600) : null,
           result: document.querySelector("#result")?.textContent || null,
         };
       }
       function check() {
         const timeRoot = document.querySelector("#time-sink");
         const constellationRoot = document.querySelector("#constellation-sink");
+        const spectrumRoot = document.querySelector("#spectrum-sink");
+        const waterfallRoot = document.querySelector("#waterfall-sink");
         const pause = timeRoot?.querySelector("[data-role='pause']");
         const auto = timeRoot?.querySelector("[data-role='y-auto']");
         const timeCanvas = timeRoot?.querySelector("canvas.rr-time-sink-canvas");
         const constellationCanvas = constellationRoot?.querySelector("canvas.rr-constellation-sink-canvas");
-        if (timeRoot && pause && auto && timeCanvas && constellationRoot && constellationCanvas) {
+        const spectrumCanvas = spectrumRoot?.querySelector("canvas.rr-spectrum-sink-canvas");
+        const waterfallCanvas = waterfallRoot?.querySelector("canvas.rr-waterfall-sink-canvas");
+        if (
+          timeRoot && pause && auto && timeCanvas &&
+          constellationRoot && constellationCanvas &&
+          spectrumRoot && spectrumCanvas &&
+          waterfallRoot && waterfallCanvas
+        ) {
           resolve({
             crossOriginIsolated: window.crossOriginIsolated,
             pauseText: pause.textContent,
             autoText: auto.textContent,
             timeCanvasClass: timeCanvas.className,
             constellationCanvasClass: constellationCanvas.className,
+            spectrumCanvasClass: spectrumCanvas.className,
+            waterfallCanvasClass: waterfallCanvas.className,
             resultText: document.querySelector("#result")?.textContent || "",
           });
           return;

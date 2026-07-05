@@ -383,7 +383,7 @@ h1 {
   background: var(--surface-muted);
 }
 
-#spectrum-graph {
+.rr-spectrum-sink-canvas {
   display: block;
   width: 100%;
   height: clamp(280px, 32vh, 380px);
@@ -392,7 +392,7 @@ h1 {
   background: var(--surface-muted);
 }
 
-#waterfall-graph {
+.rr-waterfall-sink-canvas {
   display: block;
   width: 100%;
   height: clamp(280px, 32vh, 380px);
@@ -516,6 +516,8 @@ h1 {
   #float-graph,
   .rr-time-sink-canvas,
   .rr-constellation-sink-canvas,
+  .rr-spectrum-sink-canvas,
+  .rr-waterfall-sink-canvas,
   .plot-surface {
     min-height: 16rem;
     height: 16rem;
