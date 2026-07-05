@@ -158,13 +158,13 @@ fn clear_input_source() {
 
 /// Borrow the application-owned time sink handle from main-thread callbacks.
 fn with_time_sink<T>(
-    f: impl FnOnce(&crate::time_sink::TimeSink) -> Result<T, JsValue>,
-) -> Result<T, JsValue> {
+    f: impl FnOnce(&crate::time_sink::TimeSink) -> rustradio::Result<T>,
+) -> rustradio::Result<T> {
     TIME_SINK.with(|slot| {
         let sink = slot.borrow();
         let sink = sink
             .as_ref()
-            .ok_or_else(|| JsValue::from_str("time sink has not been initialized"))?;
+            .ok_or_else(|| rustradio::Error::msg("time sink has not been initialized"))?;
         f(sink)
     })
 }

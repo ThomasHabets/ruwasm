@@ -12,6 +12,15 @@ use web_sys::{
     HtmlInputElement,
 };
 
+/// Convert browser/DOM failures into the crate-level error type exposed by the
+/// time sink API.
+fn dom_result<T>(result: Result<T, JsValue>, context: &str) -> rustradio::Result<T> {
+    result.map_err(|err| {
+        let detail = err.as_string().unwrap_or_else(|| format!("{err:?}"));
+        rustradio::Error::msg(format!("{context}: {detail}"))
+    })
+}
+
 const TIME_SINK_HTML: &str = r#"
 <div class="panel-header rr-time-sink-header">
   <div>
@@ -76,13 +85,22 @@ pub(crate) struct TimeSink {
 
 impl TimeSink {
     /// Find a mount element by ID and replace its contents with a time sink.
-    pub(crate) fn mount_by_id(id: &str, options: TimeSinkOptions) -> Result<Self, JsValue> {
-        let root = get_element_by_id(id)?;
+    pub(crate) fn mount_by_id(id: &str, options: TimeSinkOptions) -> rustradio::Result<Self> {
+        let root = dom_result(
+            get_element_by_id(id),
+            &format!("finding time sink mount element {id}"),
+        )?;
         Self::mount(&root, options)
     }
 
     /// Mount a self-contained time sink into an existing DOM element.
-    pub(crate) fn mount(root: &Element, options: TimeSinkOptions) -> Result<Self, JsValue> {
+    pub(crate) fn mount(root: &Element, options: TimeSinkOptions) -> rustradio::Result<Self> {
+        dom_result(Self::mount_dom(root, options), "mounting time sink")
+    }
+
+    /// Mount the generated DOM and wire handlers, preserving browser-native
+    /// errors until the public API boundary.
+    fn mount_dom(root: &Element, options: TimeSinkOptions) -> Result<Self, JsValue> {
         root.set_inner_html(TIME_SINK_HTML);
 
         role::<Element>(root, "title")?.set_text_content(Some(&options.title));
@@ -124,37 +142,40 @@ impl TimeSink {
 
     /// Add new tagged float streams to the sink and redraw unless paused.
     #[allow(clippy::needless_pass_by_value)]
-    pub(crate) fn update(&self, streams: Vec<TaggedVec<Float>>) -> Result<(), JsValue> {
+    pub(crate) fn update(&self, streams: Vec<TaggedVec<Float>>) -> rustradio::Result<()> {
         let mut inner = self.inner.borrow_mut();
         inner.append_streams(&streams);
-        if inner.paused {
+        let result = if inner.paused {
             inner.sync_controls()
         } else {
             inner.draw()
-        }
+        };
+        dom_result(result, "updating time sink")
     }
 
     /// Set the sample rate used to convert sample indexes into seconds.
-    pub(crate) fn set_sample_rate(&self, sample_rate: f64) -> Result<(), JsValue> {
+    pub(crate) fn set_sample_rate(&self, sample_rate: f64) -> rustradio::Result<()> {
         let mut inner = self.inner.borrow_mut();
         inner.set_sample_rate(sample_rate);
-        if inner.paused {
+        let result = if inner.paused {
             inner.sync_controls()
         } else {
             inner.draw()
-        }
+        };
+        dom_result(result, "setting time sink sample rate")
     }
 
     /// Pause or resume drawing through the API, matching the UI button state.
     #[allow(dead_code)]
-    pub(crate) fn set_paused(&self, paused: bool) -> Result<(), JsValue> {
+    pub(crate) fn set_paused(&self, paused: bool) -> rustradio::Result<()> {
         let mut inner = self.inner.borrow_mut();
         inner.paused = paused;
-        if inner.paused {
+        let result = if inner.paused {
             inner.sync_controls()
         } else {
             inner.draw()
-        }
+        };
+        dom_result(result, "setting time sink pause state")
     }
 
     /// Return whether incoming updates are currently buffered without redraw.
@@ -165,10 +186,10 @@ impl TimeSink {
 
     /// Drop all buffered series data and redraw the empty sink.
     #[allow(dead_code)]
-    pub(crate) fn clear(&self) -> Result<(), JsValue> {
+    pub(crate) fn clear(&self) -> rustradio::Result<()> {
         let mut inner = self.inner.borrow_mut();
         inner.series.clear();
-        inner.draw()
+        dom_result(inner.draw(), "clearing time sink")
     }
 
     /// Redraw the current sink state.
