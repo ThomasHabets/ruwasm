@@ -38,6 +38,15 @@ Enjoy the awesomeness.
 * Make most of time sink in HTML templated instead of assuming HTML has it.
 * Waterfall sink.
 
+## Browser smoke test
+
+Run the packaged app in headless Chrome and verify that the WASM UI starts and
+generates the time sink component:
+
+```
+tests/browser-smoke.sh
+```
+
 ## WebSocket
 
 You can run a websocket data provider on localhost, or somewhere that has a
