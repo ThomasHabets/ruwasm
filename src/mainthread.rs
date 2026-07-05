@@ -15,7 +15,7 @@ use crate::js_performance_now;
 use crate::{Ax25Messages, MainToWorker, WorkerToMain};
 use rustradio_ui::TaggedVec;
 
-use rustradio_ui::mainthread::{post_message, send_message, start_worker};
+use rustradio_ui::mainthread::{post_message, send_message, start_worker, time_sink};
 
 const HTML_DISABLED: &str = "disabled";
 const ID_RESULT: &str = "result";
@@ -53,7 +53,7 @@ thread_local! {
     static PENDING_FILE_REQUESTS: RefCell<Vec<(String, usize)>> = const { RefCell::new(Vec::new()) };
     static INPUT_SOURCE: RefCell<InputSource> = const { RefCell::new(InputSource::None) };
     static WS_SOCKET: RefCell<Option<WebSocket>> = const { RefCell::new(None) };
-    static TIME_SINK: RefCell<Option<crate::time_sink::TimeSink>> = const { RefCell::new(None) };
+    static TIME_SINK: RefCell<Option<time_sink::TimeSink>> = const { RefCell::new(None) };
 }
 
 async fn read_data(start: u64, size: u64) -> Result<Vec<u8>, JsValue> {
@@ -158,7 +158,7 @@ fn clear_input_source() {
 
 /// Borrow the application-owned time sink handle from main-thread callbacks.
 fn with_time_sink<T>(
-    f: impl FnOnce(&crate::time_sink::TimeSink) -> rustradio::Result<T>,
+    f: impl FnOnce(&time_sink::TimeSink) -> rustradio::Result<T>,
 ) -> rustradio::Result<T> {
     TIME_SINK.with(|slot| {
         let sink = slot.borrow();
@@ -597,9 +597,9 @@ pub(crate) async fn setup() -> Result<(), JsValue> {
     // Init the worker.
     start_worker::<crate::Ax25MainToWorker, crate::Ax25WorkerToMain, _, _>(worker_msg);
 
-    let time_sink = crate::time_sink::TimeSink::mount_by_id(
+    let time_sink = time_sink::TimeSink::mount_by_id(
         ID_TIME_SINK,
-        crate::time_sink::TimeSinkOptions {
+        time_sink::TimeSinkOptions {
             title: "Signal Strength".into(),
             subtitle: "Float stream amplitude over time".into(),
             y_label: "Amplitude".into(),
