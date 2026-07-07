@@ -256,8 +256,8 @@ async fn worker_msg(msg: WorkerToMain) -> Result<(), JsValue> {
         WorkerToMain::End(s) => {
             info!("Main: worker returned: {s:?}");
         }
-        WorkerToMain::LogLine { level, line } => {
-            log::log!(level, "[worker] {line}");
+        WorkerToMain::LogLine { .. } => {
+            // Handled by framework.
         }
         WorkerToMain::Ping(t) => {
             post_message(&MainToWorker::Pong(t)).unwrap();

@@ -8,11 +8,8 @@ UI_DIR="$(dirname "$UI_MANIFEST")"
 UI_ASSETS="${UI_DIR}/assets"
 
 TMPD="$(mktemp -d)"
-if [[ ${1:-release} = "release" ]]; then
-        wasm-pack build --target web -d "$TMPD/$PREFIX" --profiling
-else
-        wasm-pack build --target web -d "$TMPD/$PREFIX" --dev
-fi
+PROFILE="${1:-release}"
+wasm-pack build --target web -d "$TMPD/$PREFIX" "--$PROFILE"
 GIT="$(git describe --tags --dirty --always)"
 cp \
         "$WEBD/index.html" \

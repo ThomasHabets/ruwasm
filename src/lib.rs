@@ -96,6 +96,7 @@ pub async fn start() -> Result<(), JsValue> {
     } else {
         rustradio_ui::dom_logger::init_logging::<Ax25WorkerToMain>(
             crate::mainthread::ID_LOG_OUTPUT,
+            log::LevelFilter::Info,
         )
         .expect("failed to init logging");
         info!("Main: Starting at time {}", js_performance_now());

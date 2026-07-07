@@ -360,7 +360,7 @@ fn add_spectrum_tap(
         StreamToPdu::new(prev, rustradio::fft_stream::TAG_FRAME, SPECTRUM_SIZE, 1),
         PduAverage::new(prev, 10),
     ];
-    let sink = FloatPduSink::new(prev, "iq_spectrum".into());
+    let sink = FloatPduSink::new(prev, "iq_spectrum");
     g.add(Box::new(sink));
 
     src
@@ -382,7 +382,7 @@ fn add_audio_tap(
             .interp(AUDIO_SAMPLE_RATE)
             .build(audio)?
     ];
-    let sink = FloatSink::new(audio, "audio_demod".into());
+    let sink = FloatSink::new(audio, "audio_demod");
     g.add(Box::new(sink));
 
     Ok(src)
@@ -411,7 +411,7 @@ fn add_viz_taps(
     let mag_prev = blockchain![g, mag_prev, ComplexToMag2::new(mag_prev)];
 
     let constellation_sink = ComplexSink::new(constellation_prev, "iq_constellation".into());
-    let mag_sink = FloatSink::new(mag_prev, "iq_mag".into());
+    let mag_sink = FloatSink::new(mag_prev, "iq_mag");
     g.add(Box::new(constellation_sink));
     g.add(Box::new(mag_sink));
 
