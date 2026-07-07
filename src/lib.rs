@@ -17,7 +17,6 @@ use wasm_bindgen::prelude::*;
 pub use wasm_bindgen_rayon::init_thread_pool;
 
 mod mainthread;
-mod wasm_graph;
 mod worker;
 
 type MainToWorker = rustradio_ui::MainToWorker<Ax25MainToWorker>;

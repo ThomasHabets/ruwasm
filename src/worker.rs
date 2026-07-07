@@ -8,6 +8,7 @@ use rustradio::blockchain;
 use rustradio::blocks::*;
 use rustradio::graph::GraphRunner;
 use rustradio::stream::ReadStream;
+use rustradio::wasm::wasm_graph;
 use rustradio_ui::worker::{post_message, send_message, send_message_sync, source};
 use rustradio_ui::{BootstrapMpsc, TaggedVec};
 
@@ -202,7 +203,7 @@ async fn radio_1200(samp_rate: u64, offset: Float, rtlsdr: bool) -> rustradio::R
     let max_deviation = 0.1;
 
     // Set up source block.
-    let mut g = crate::wasm_graph::WasmGraph::new();
+    let mut g = wasm_graph::WasmGraph::new();
     let (src, prev, src_tx) =
         source::WasmSource::<crate::Ax25WorkerToMain, _>::new(crate::RECEIVER_SOURCE_ID);
     g.add(Box::new(src));
@@ -343,7 +344,7 @@ async fn radio_1200(samp_rate: u64, offset: Float, rtlsdr: bool) -> rustradio::R
 
 /// Tee off the downsampled IF stream into FFT spectrum frames for the UI.
 fn add_spectrum_tap(
-    g: &mut crate::wasm_graph::WasmGraph,
+    g: &mut wasm_graph::WasmGraph,
     src: ReadStream<rustradio::Complex>,
 ) -> ReadStream<rustradio::Complex> {
     let (tee, src, prev) = Tee::new(src);
@@ -368,7 +369,7 @@ fn add_spectrum_tap(
 
 /// Tee off demodulated audio after the first FM demodulator.
 fn add_audio_tap(
-    g: &mut crate::wasm_graph::WasmGraph,
+    g: &mut wasm_graph::WasmGraph,
     src: ReadStream<rustradio::Float>,
 ) -> rustradio::Result<ReadStream<rustradio::Float>> {
     let (tee, src, audio) = Tee::new(src);
@@ -390,7 +391,7 @@ fn add_audio_tap(
 
 /// Tee off one downsampled complex stream for the visualization sinks.
 fn add_viz_taps(
-    g: &mut crate::wasm_graph::WasmGraph,
+    g: &mut wasm_graph::WasmGraph,
     src: ReadStream<rustradio::Complex>,
 ) -> rustradio::Result<ReadStream<rustradio::Complex>> {
     let (input_tee, src, prev) = Tee::new(src);
