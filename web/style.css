@@ -222,40 +222,6 @@ h1 {
   align-content: start;
 }
 
-.panel {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow);
-  overflow: hidden;
-}
-
-.panel-header {
-  display: flex;
-  gap: 1rem;
-  align-items: start;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--border);
-  padding: 1rem 1rem 0.85rem;
-  background: var(--surface-strong);
-}
-
-.panel-title {
-  margin: 0;
-  font-size: 1rem;
-  line-height: 1.25;
-}
-
-.panel-kicker {
-  margin: 0.2rem 0 0;
-  color: var(--muted);
-  font-size: 0.86rem;
-}
-
-.panel-body {
-  padding: 1rem;
-}
-
 .control-stack {
   display: grid;
   gap: 1rem;

@@ -30,26 +30,26 @@
 
   <main class="app-main">
     <aside class="sidebar" aria-label="Receiver controls">
-      <section class="panel">
-        <div class="panel-header">
+      <section class="rr-panel">
+        <div class="rr-panel-header">
           <div>
-            <h2 class="panel-title">Runtime</h2>
-            <p class="panel-kicker">WASM status and worker messages</p>
+            <h2 class="rr-panel-title">Runtime</h2>
+            <p class="rr-panel-kicker">WASM status and worker messages</p>
           </div>
         </div>
-        <div class="panel-body">
+        <div class="rr-panel-body">
           <pre id="result" class="runtime-log" aria-live="polite">Loading WASM runtime...</pre>
         </div>
       </section>
 
-      <section class="panel">
-        <div class="panel-header">
+      <section class="rr-panel">
+        <div class="rr-panel-header">
           <div>
-            <h2 class="panel-title">Diagnostics</h2>
-            <p class="panel-kicker">Browser and worker round trips</p>
+            <h2 class="rr-panel-title">Diagnostics</h2>
+            <p class="rr-panel-kicker">Browser and worker round trips</p>
           </div>
         </div>
-        <div class="panel-body">
+        <div class="rr-panel-body">
           <div class="action-row">
             <button id="btn-add" type="button" disabled>Add 5 and 3</button>
             <button id="btn-ping" type="button" disabled>Send ping</button>
@@ -57,14 +57,14 @@
         </div>
       </section>
 
-      <section class="panel">
-        <div class="panel-header">
+      <section class="rr-panel">
+        <div class="rr-panel-header">
           <div>
-            <h2 class="panel-title">Receiver</h2>
-            <p class="panel-kicker">Start the RustRadio graph</p>
+            <h2 class="rr-panel-title">Receiver</h2>
+            <p class="rr-panel-kicker">Start the RustRadio graph</p>
           </div>
         </div>
-        <div id="form-rr" class="panel-body control-stack">
+        <div id="form-rr" class="rr-panel-body control-stack">
           <div class="field-group">
             <label for="input-samp-rate">Sample rate</label>
             <input id="input-samp-rate" type="number" min="1" step="1" value="250000" inputmode="numeric">
@@ -84,14 +84,14 @@
         </div>
       </section>
 
-      <section class="panel">
-        <div class="panel-header">
+      <section class="rr-panel">
+        <div class="rr-panel-header">
           <div>
-            <h2 class="panel-title">Data source</h2>
-            <p class="panel-kicker">32-bit complex I/Q or RTL-SDR input</p>
+            <h2 class="rr-panel-title">Data source</h2>
+            <p class="rr-panel-kicker">32-bit complex I/Q or RTL-SDR input</p>
           </div>
         </div>
-        <div id="form-rr-input" class="panel-body control-stack">
+        <div id="form-rr-input" class="rr-panel-body control-stack">
           <div class="field-group">
             <h3>File source</h3>
             <label for="fileInput">Capture file</label>
@@ -130,24 +130,24 @@
 
     <section class="workspace" aria-label="Visualization workspace">
       <div class="visualization-grid">
-        <section id="time-sink" class="panel visual-panel-wide"
+        <section id="time-sink" class="rr-panel visual-panel-wide"
                 data-viz-slot="time-series">Loading…</section>
 
-        <section id="constellation-sink" class="panel visual-panel"
+        <section id="constellation-sink" class="rr-panel visual-panel"
                 data-viz-slot="constellation">Loading…</section>
 
-        <section id="spectrum-sink" class="panel visual-panel"
+        <section id="spectrum-sink" class="rr-panel visual-panel"
                 data-viz-slot="spectrum">Loading…</section>
 
-        <section id="waterfall-sink" class="panel visual-panel"
+        <section id="waterfall-sink" class="rr-panel visual-panel"
                 data-viz-slot="waterfall">Loading…</section>
       </div>
     </section>
-    <section class="panel visual-panel" data-viz-slot="log">
-            <div class="panel-header">
-                    <h3 class="panel-title">Log</h3>
+    <section class="rr-panel visual-panel" data-viz-slot="log">
+            <div class="rr-panel-header">
+                    <h3 class="rr-panel-title">Log</h3>
             </div>
-            <div class="panel-body">
+            <div class="rr-panel-body">
                     <pre id="log-output" class="event-log">Page loaded</pre>
             </div>
     </section>
