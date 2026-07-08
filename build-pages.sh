@@ -22,7 +22,7 @@ cp \
 cat \
         "$UI_ASSETS/rustradio.css" \
         "$WEBD/style.css" \
-        > "$TMPD/$PREFIX/style.css"
+        > "$OUTDIR/$PREFIX/style.css"
 cp "$UI_ASSETS/bootstrap.js" "$OUTDIR/$PREFIX/rustradio-ui-bootstrap.js"
 sed -i "s/GIT_VERSION_NOT_SET/$GIT/g" "$OUTDIR/$PREFIX/index.html"
 
