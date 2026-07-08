@@ -14,7 +14,15 @@ mkdir -p "$OUTDIR"
 
 GIT="$(git describe --tags --dirty --always)"
 wasm-pack build --target web -d "$OUTDIR/$PREFIX"
-cp "$WEBD/index.html" "$WEBD/style.css" "$WEBD/wasm-mod.js" "$WEBD/coi-serviceworker.min.js" "$OUTDIR/$PREFIX/"
+cp \
+        "$WEBD/index.html" \
+        "$WEBD/wasm-mod.js" \
+        "$WEBD/coi-serviceworker.min.js" \
+        "$OUTDIR/$PREFIX/"
+cat \
+        "$UI_ASSETS/rustradio.css" \
+        "$WEBD/style.css" \
+        > "$TMPD/$PREFIX/style.css"
 cp "$UI_ASSETS/bootstrap.js" "$OUTDIR/$PREFIX/rustradio-ui-bootstrap.js"
 sed -i "s/GIT_VERSION_NOT_SET/$GIT/g" "$OUTDIR/$PREFIX/index.html"
 
