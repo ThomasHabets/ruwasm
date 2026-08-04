@@ -18,7 +18,7 @@ log = { version = "0.4.29", features = ["serde"] }
 num-complex = { version = "0.4", features = ["serde"] }
 rax25 = { version = "0.2.6", default-features = false }
 rayon = "1.12.0"
-rtlsdr-pure = "0.1.6"
+rtlsdr-pure = "0.2.3"
 rustradio = { version = "0.18.1", features = ["wasm", "fast-math", "simd"] }
 rustradio_macros = "0.18.1"
 rustradio-ui = { version = "0.1.21", features = ["audio"] }
@@ -56,6 +56,7 @@ debug = true
 
 [patch.crates-io]
 #rtlsdr-pure = { path = "../rtlsdr-pure" }
+# nusb = { path = "../nusb" }
 #cross_usb = { path = "../rtlsdr-pure/vendor/cross_usb" }
 #rustradio = { path = "../rustradio" }
 #rustradio-ui = { path = "../rustradio/rustradio-ui" }
