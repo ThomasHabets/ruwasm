@@ -9,8 +9,8 @@ use rustradio::blocks::*;
 use rustradio::graph::GraphRunner;
 use rustradio::stream::ReadStream;
 use rustradio::wasm::wasm_graph;
+use rustradio_ui::TaggedVec;
 use rustradio_ui::worker::{post_message, send_message, send_message_sync, source};
-use rustradio_ui::{BootstrapMpsc, TaggedVec};
 
 use log::{error, info, warn};
 use wasm_bindgen::prelude::*;
@@ -77,7 +77,7 @@ async fn send_source_msg(id: &str, msg: source::Msg<u8>) -> Result<(), JsValue> 
 /// Convert one shared-memory byte message into a graph-source update.
 fn source_msg_from_bytes(streams: Vec<TaggedVec<u8>>) -> source::Msg<u8> {
     let mut streams = streams.into_iter();
-    let mut data = streams.next().map(|stream| stream.data).unwrap_or_default();
+    let mut data = streams.next().map_or_else(Vec::new, |stream| stream.data);
     for stream in streams {
         data.extend(stream.data);
     }
@@ -91,30 +91,18 @@ fn source_msg_from_bytes(streams: Vec<TaggedVec<u8>>) -> source::Msg<u8> {
 /// Handle message sent from Main thread to worker.
 async fn worker_msg(msg: MainToWorker) -> Result<(), JsValue> {
     match msg {
-        MainToWorker::BootstrapMpsc(b) => {
-            info!("Received main channel endpoints");
-            let BootstrapMpsc { tx, rx } =
-                BootstrapMpsc::<crate::Ax25MainToWorker, crate::Ax25WorkerToMain>::from_ptr(b);
-            rustradio_ui::worker::set_main_ui_tx(tx);
-            spawn_local(async move {
-                while let Ok(msg) = rx.recv().await {
-                    if let Err(e) = worker_msg(msg).await {
-                        error!("Failed to process message {e:?}");
-                    }
-                }
-            });
-        }
         MainToWorker::Start(crate::Ax25Start {
             samp_rate,
             offset,
             rtlsdr,
         }) => {
             info!("Got MainToWorker::Start sample rate {samp_rate} offset {offset}");
-            // Run the decoder.
-            let s = radio_1200(samp_rate, offset, rtlsdr).await?;
-            // Using reference serialization here doesn't actually help, but it
-            // does work.
-            send_message(WorkerToMain::End(crate::Ax25End { s })).await?;
+            // Keep receiving source data while the decoder is running.
+            rustradio_ui::spawn(async move {
+                let s = radio_1200(samp_rate, offset, rtlsdr).await?;
+                send_message(WorkerToMain::End(crate::Ax25End { s })).await?;
+                Ok(())
+            });
         }
         MainToWorker::Bytes(name, streams) => {
             send_source_msg(&name, source_msg_from_bytes(streams)).await?;
@@ -135,36 +123,21 @@ async fn worker_msg(msg: MainToWorker) -> Result<(), JsValue> {
 }
 
 /// Main entry point into the worker.
-#[allow(clippy::unused_async)]
 pub(crate) async fn setup() -> Result<(), JsValue> {
     info!("Setting up worker");
 
-    let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
-        // TODO: is `spawn_local` guaranteed to enqueue these messages in order?
-        // If not, then data may arrive out of order.
-        //
-        // If that's the case, then we're going to have to queue up the data
-        // syncly somehow. Maybe by adding a hop through an mpsc. That or remove
-        // a level of indirection. :-)
+    rustradio_ui::worker::setup::<crate::Ax25MainToWorker, crate::Ax25WorkerToMain, _>(|rx| {
         spawn_local(async move {
-            match event.data().try_into() {
-                Ok(msg) => {
-                    match &msg {
-                        MainToWorker::BootstrapMpsc(_) => {}
-                        _other => warn!("Worker received posted {msg:?}"),
-                    }
-                    if let Err(e) = worker_msg(msg).await {
-                        info!("Worker message handler failed: {e:?}");
-                    }
+            while let Ok(msg) = rx.recv().await {
+                if let Err(e) = worker_msg(msg).await {
+                    error!("Failed to process message {e:?}");
                 }
-                Err(e) => error!("Failed to deserialize event {event:?}: {e:?}"),
             }
         });
-    });
+    })
+    .await?;
 
     let global = web_sys::js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>()?;
-    global.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
-    onmessage.forget();
 
     // Set messageerror handler.
     let onmsgerr =

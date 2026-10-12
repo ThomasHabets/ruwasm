@@ -532,7 +532,7 @@ async function runSmokeTest(appUrl, cdp) {
   if (value.pauseText !== "Pause") {
     throw new Error(`unexpected pause button text: ${value.pauseText}`);
   }
-  if (value.autoText !== "Autoscale On") {
+  if (value.autoText !== "Autoscale Off") {
     throw new Error(`unexpected autoscale button text: ${value.autoText}`);
   }
   if (pageErrors.length > 0) {

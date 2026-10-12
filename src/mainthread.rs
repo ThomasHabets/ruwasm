@@ -16,7 +16,7 @@ use crate::{Ax25Messages, MainToWorker, WorkerToMain};
 use rustradio_ui::TaggedVec;
 
 use rustradio_ui::mainthread::{
-    constellation_sink, post_message, send_message, spectrum_sink, start_worker, time_sink,
+    constellation_sink, send_message, send_message_sync, spectrum_sink, start_worker, time_sink,
 };
 
 const HTML_DISABLED: &str = "disabled";
@@ -260,7 +260,7 @@ async fn worker_msg(msg: WorkerToMain) -> Result<(), JsValue> {
             // Handled by framework.
         }
         WorkerToMain::Ping(t) => {
-            post_message(&MainToWorker::Pong(t)).unwrap();
+            send_message(MainToWorker::Pong(t)).await?;
         }
         WorkerToMain::Pong(from) => {
             let to = js_performance_now();
@@ -481,7 +481,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
     {
         let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
             info!("ping button clicked");
-            post_message(&MainToWorker::Ping(js_performance_now()))?;
+            send_message_sync(MainToWorker::Ping(js_performance_now()))?;
             Ok(())
         });
         let btn = get_element(ID_PING)?.dyn_into::<web_sys::HtmlButtonElement>()?;
@@ -536,7 +536,7 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
                 .checked();
             with_time_sink(|sink| sink.set_sample_rate(crate::worker::VIZ_SAMPLE_RATE as f64))?;
             rustradio_ui::browser_audio::reset()?;
-            post_message(&MainToWorker::Start(crate::Ax25Start {
+            send_message_sync(MainToWorker::Start(crate::Ax25Start {
                 samp_rate,
                 offset,
                 rtlsdr,
