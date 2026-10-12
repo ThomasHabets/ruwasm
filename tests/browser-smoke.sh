@@ -6,6 +6,7 @@ TMPD="$(mktemp -d)"
 trap 'rm -rf "$TMPD"' EXIT
 
 cd "$ROOT"
+node --test tests/chrome-launcher.test.mjs
 ./build-local.sh dev
 
 mkdir -p "$TMPD/site"

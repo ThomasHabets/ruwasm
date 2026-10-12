@@ -3,9 +3,9 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
-import os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
+import { launchChrome } from "./chrome-launcher.mjs";
 
 const siteRoot = process.argv[2];
 if (!siteRoot) {
@@ -88,87 +88,6 @@ function findChrome() {
   }
 
   throw new Error("could not find Chrome; set CHROME=/path/to/chrome");
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function removeDirWithRetry(dir) {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    try {
-      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-      return;
-    } catch (err) {
-      if (attempt === 9) {
-        console.warn(`warning: failed to remove ${dir}: ${err.message}`);
-        return;
-      }
-      await sleep(100);
-    }
-  }
-}
-
-async function launchChrome() {
-  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "ruwasm-smoke-chrome-"));
-  const chrome = spawn(
-    findChrome(),
-    [
-      "--headless=new",
-      "--no-sandbox",
-      "--disable-gpu",
-      "--disable-dev-shm-usage",
-      "--remote-debugging-port=0",
-      `--user-data-dir=${userDataDir}`,
-      "about:blank",
-    ],
-    { stdio: ["ignore", "ignore", "pipe"] },
-  );
-
-  chrome.stderr.setEncoding("utf8");
-  let stderr = "";
-  const wsUrl = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`timed out waiting for Chrome DevTools URL\n${stderr}`));
-    }, 10_000);
-
-    chrome.stderr.on("data", (chunk) => {
-      stderr += chunk;
-      const match = stderr.match(/DevTools listening on (ws:\/\/[^\s]+)/);
-      if (match) {
-        clearTimeout(timer);
-        resolve(match[1]);
-      }
-    });
-
-    chrome.once("exit", (code, signal) => {
-      clearTimeout(timer);
-      reject(new Error(`Chrome exited before DevTools was ready: ${code ?? signal}\n${stderr}`));
-    });
-  });
-
-  return {
-    chrome,
-    userDataDir,
-    wsUrl,
-    async close() {
-      if (!chrome.killed) {
-        chrome.kill("SIGTERM");
-      }
-      await Promise.race([
-        new Promise((resolve) => chrome.once("exit", resolve)),
-        sleep(2_000),
-      ]);
-      if (chrome.exitCode === null && chrome.signalCode === null) {
-        chrome.kill("SIGKILL");
-        await Promise.race([
-          new Promise((resolve) => chrome.once("exit", resolve)),
-          sleep(1_000),
-        ]);
-      }
-      await removeDirWithRetry(userDataDir);
-    },
-  };
 }
 
 class DevToolsWebSocket {
@@ -548,7 +467,7 @@ let socket;
 try {
   const staticServer = await startStaticServer(resolvedSiteRoot);
   server = staticServer.server;
-  chrome = await launchChrome();
+  chrome = await launchChrome(findChrome());
   socket = new DevToolsWebSocket(chrome.wsUrl);
   await socket.connect();
   const cdp = new Cdp(socket);
