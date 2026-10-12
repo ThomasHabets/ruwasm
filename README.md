@@ -7,30 +7,12 @@
 
 ## Quick start
 
-Build the `ws_stdout` example from this repo.
+Go to <https://thomashabets.github.io/ruwasm/>, set the sample rate and
+frequency offset, and click "Start RustRadio graph". Then select a capture
+file or connect an RTL-SDR through the browser.
 
-```
-cargo build --release --bin ws_stdout
-# binary now in target/release/ws_stdout
-```
-
-Then build the `rtl_data_stream` binary from [rustradio][rustradio] repo.
-
-```
-cargo build -F rtlsdr --release --example rtl_data_stream
-# binary now in target/release/examples/rtl_data_stream
-```
-
-Then start them, locally.
-
-```
-ws_stdout -- rtl_data_stream --freq 144750000
-```
-
-Then go to <https://thomashabets.github.io/ruwasm/>, check the "RTL-SDR unsigned
-8-bit I/Q input" box, click "start rustradio", then "Connect WebSocket stream".
-
-Enjoy the awesomeness.
+For an RTL-SDR capture or live receiver, enable "RTL-SDR 8-bit I/Q input".
+For a 32-bit complex I/Q capture, leave it unchecked.
 
 ## TODO
 
@@ -46,30 +28,6 @@ generates the time sink component:
 ```
 tests/browser-smoke.sh
 ```
-
-## WebSocket
-
-You can run a websocket data provider on localhost, or somewhere that has a
-valid HTTPS cert. For `ws://`, only localhost will work, because of browser
-security boundaries.
-
-The WebSocket source expects the `DATA_STREAM.md` protocol from rustradio. Raw
-byte streams such as `cat some_file.c32` should use the file input instead.
-
-### WebSocket live stream
-
-It's not keeping up with real time, and delays instead of drops data (TODO), but
-you can stream directly from RTL-SDR using a rustradio example binary
-`rtl_data_stream`.
-
-```
-cargo run --bin ws_stdout -- \
-    cargo run --manifest-path ../rustradio/Cargo.toml \
-        --example rtl_data_stream --features rtlsdr -- \
-        --freq 144750000
-```
-
-Don't forget to tick the RTL-SDR format checkbox in the UI.
 
 ## Life of a WASM worker
 
@@ -98,5 +56,3 @@ depending on which code is running.
 ## Useful links
 
 * <https://notes.brooklynzelenka.com/Blog/Notes-on-Writing-Wasm>
-
-[rustradio]: https://github.com/ThomasHabets/rustradio

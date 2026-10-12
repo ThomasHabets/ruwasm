@@ -9,7 +9,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::js_sys;
 use web_sys::js_sys::Uint8Array;
-use web_sys::{BinaryType, Element, Event, File, HtmlInputElement, MessageEvent, WebSocket};
+use web_sys::{Element, Event, File, HtmlInputElement};
 
 use crate::js_performance_now;
 use crate::{Ax25Messages, MainToWorker, WorkerToMain};
@@ -25,8 +25,6 @@ const ID_START: &str = "btn-start";
 const ID_SAMP_RATE: &str = "input-samp-rate";
 const ID_RTLSDR_FORMAT: &str = "input-rtlsdr-format";
 const ID_FILE_INPUT: &str = "fileInput";
-const ID_WS_URL: &str = "input-ws-url";
-const ID_WS_CONNECT: &str = "btn-ws-connect";
 const ID_ADD: &str = "btn-add";
 const ID_PING: &str = "btn-ping";
 const ID_AUDIO_VOLUME: &str = "input-audio-volume";
@@ -48,7 +46,6 @@ const RTLSDR_MAX_GAIN_TENTHS_DB: i32 = 500;
 enum InputSource {
     None,
     File,
-    WebSocket,
     RtlSdr,
 }
 
@@ -57,7 +54,6 @@ thread_local! {
     static FILE_POS: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
     static PENDING_FILE_REQUESTS: RefCell<Vec<(String, usize)>> = const { RefCell::new(Vec::new()) };
     static INPUT_SOURCE: RefCell<InputSource> = const { RefCell::new(InputSource::None) };
-    static WS_SOCKET: RefCell<Option<WebSocket>> = const { RefCell::new(None) };
     static TIME_SINK: RefCell<Option<time_sink::TimeSink>> = const { RefCell::new(None) };
     static CONSTELLATION_SINK: RefCell<Option<constellation_sink::ConstellationSink>> =
         const { RefCell::new(None) };
@@ -138,7 +134,7 @@ async fn handle_request_data(stream: String, amount: usize) -> Result<(), JsValu
             store_pending_file_request(stream, amount);
             Ok(())
         }
-        InputSource::WebSocket | InputSource::RtlSdr => Ok(()),
+        InputSource::RtlSdr => Ok(()),
     }
 }
 
@@ -148,7 +144,7 @@ fn input_source() -> InputSource {
 }
 
 /// Lock in the single source that will feed this graph run, so file and
-/// WebSocket inputs cannot both satisfy the same receiver.
+/// RTL-SDR inputs cannot both satisfy the same receiver.
 fn select_input_source(source: InputSource) -> Result<(), JsValue> {
     INPUT_SOURCE.with(|slot| {
         let mut active = slot.borrow_mut();
@@ -159,12 +155,6 @@ fn select_input_source(source: InputSource) -> Result<(), JsValue> {
             Err(JsValue::from_str("input source already selected"))
         }
     })
-}
-
-/// Roll back source selection when source setup fails before it can feed the
-/// worker.
-fn clear_input_source() {
-    INPUT_SOURCE.with(|slot| *slot.borrow_mut() = InputSource::None);
 }
 
 /// Borrow the application-owned time sink handle from main-thread callbacks.
@@ -544,9 +534,6 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
             get_element(ID_FILE_INPUT)?
                 .dyn_into::<HtmlInputElement>()?
                 .set_disabled(false);
-            get_element(ID_WS_URL)?
-                .dyn_into::<HtmlInputElement>()?
-                .set_disabled(false);
             if rtlsdr {
                 get_element(ID_RTLSDR_FREQUENCY)?
                     .dyn_into::<HtmlInputElement>()?
@@ -556,9 +543,6 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
                     .dyn_into::<web_sys::HtmlButtonElement>()?
                     .set_disabled(false);
             }
-            get_element(ID_WS_CONNECT)?
-                .dyn_into::<web_sys::HtmlButtonElement>()?
-                .set_disabled(false);
             get_element(ID_START)?
                 .dyn_into::<web_sys::HtmlButtonElement>()?
                 .set_disabled(true);
@@ -589,24 +573,6 @@ async fn worker_msg_ready() -> Result<(), JsValue> {
         install_file_chunk_listener(input)?; // 64 KiB chunks
     }
 
-    // Set up websocket input.
-    {
-        let btn = get_element(ID_WS_CONNECT)?.dyn_into::<web_sys::HtmlButtonElement>()?;
-        let handler = Closure::<dyn FnMut() -> Result<(), JsValue>>::new(move || {
-            let url = get_element(ID_WS_URL)?
-                .dyn_into::<HtmlInputElement>()?
-                .value()
-                .trim()
-                .to_string();
-            if url.is_empty() {
-                return Err(JsValue::from_str("missing websocket URL"));
-            }
-            start_websocket_source(&url)?;
-            Ok(())
-        });
-        btn.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())?;
-        handler.forget();
-    }
     Ok(())
 }
 
@@ -763,105 +729,6 @@ fn install_file_chunk_listener(input: HtmlInputElement) -> Result<(), JsValue> {
     Ok(())
 }
 
-/// Start the WebSocket input path from the UI button by claiming the source and
-/// connecting the browser socket.
-fn start_websocket_source(url: &str) -> Result<(), JsValue> {
-    select_input_source(InputSource::WebSocket)?;
-    match connect_websocket(url) {
-        Ok(()) => {
-            disable_input_selectors()?;
-            set_content(ID_RESULT, "Connecting websocket input…")?;
-            Ok(())
-        }
-        Err(err) => {
-            clear_input_source();
-            Err(err)
-        }
-    }
-}
-
-/// Own the browser WebSocket and relay DATA_STREAM bytes between the socket and
-/// worker.
-fn connect_websocket(url: &str) -> Result<(), JsValue> {
-    let ws = WebSocket::new(url)?;
-    ws.set_binary_type(BinaryType::Arraybuffer);
-    WS_SOCKET.with(|slot| {
-        *slot.borrow_mut() = Some(ws.clone());
-    });
-
-    {
-        let url = url.to_string();
-        let onopen = Closure::<dyn FnMut(Event)>::new(move |_event: Event| {
-            info!("Main: websocket input connected to {url}");
-            let _ = set_content(ID_RESULT, "WebSocket connected. Waiting for DATA_STREAM…");
-        });
-        ws.set_onopen(Some(onopen.as_ref().unchecked_ref()));
-        onopen.forget();
-    }
-
-    {
-        let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
-            match websocket_message_bytes(event.data()) {
-                Some(_data) => {
-                    // TODO: re-implement.
-                    /*
-                    if let Err(e) = post_message(MainToWorker::DataStream(data)) {
-                        close_websocket_after_error(&e);
-                    }
-                    */
-                }
-                None => {
-                    warn!(
-                        "Main: ignoring DATA_STREAM websocket message with unsupported payload type"
-                    );
-                }
-            }
-        });
-        ws.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
-        onmessage.forget();
-    }
-
-    {
-        let onerror = Closure::<dyn FnMut(Event)>::new(move |_event: Event| {
-            error!("Main: websocket input error");
-            let _ = set_content(ID_RESULT, "WebSocket input error.");
-        });
-        ws.set_onerror(Some(onerror.as_ref().unchecked_ref()));
-        onerror.forget();
-    }
-
-    {
-        let onclose = Closure::<dyn FnMut(Event)>::new(move |_event: Event| {
-            info!("Main: websocket input closed");
-            /*
-            if let Err(e) = post_message(MainToWorker::DataStream(Vec::new())) {
-                error!("Main: failed to send websocket disconnect to worker: {e:?}");
-            }
-            */
-            let _ = set_content(ID_RESULT, "WebSocket input closed.");
-            WS_SOCKET.with(|slot| {
-                slot.borrow_mut().take();
-            });
-        });
-        ws.set_onclose(Some(onclose.as_ref().unchecked_ref()));
-        onclose.forget();
-    }
-
-    Ok(())
-}
-
-/// Normalize supported WebSocket payload shapes into protocol bytes.
-#[allow(clippy::needless_pass_by_value)]
-fn websocket_message_bytes(data: JsValue) -> Option<Vec<u8>> {
-    if let Ok(buf) = data.clone().dyn_into::<js_sys::ArrayBuffer>() {
-        return Some(Uint8Array::new(&buf).to_vec());
-    }
-    if let Ok(bytes) = data.clone().dyn_into::<Uint8Array>() {
-        return Some(bytes.to_vec());
-    }
-    data.as_string().map(String::into_bytes)
-}
-
 /// Freeze input-picking controls after one source wins, mirroring the
 /// single-source state tracked by INPUT_SOURCE.
 fn disable_input_selectors() -> Result<(), JsValue> {
@@ -878,12 +745,5 @@ fn disable_input_selectors() -> Result<(), JsValue> {
         .dyn_into::<web_sys::HtmlButtonElement>()?
         .set_disabled(true);
 
-    // Websocket.
-    get_element(ID_WS_URL)?
-        .dyn_into::<HtmlInputElement>()?
-        .set_disabled(true);
-    get_element(ID_WS_CONNECT)?
-        .dyn_into::<web_sys::HtmlButtonElement>()?
-        .set_disabled(true);
     Ok(())
 }
